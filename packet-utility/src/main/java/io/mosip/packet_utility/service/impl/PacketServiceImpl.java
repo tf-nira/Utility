@@ -337,31 +337,42 @@ public class PacketServiceImpl implements PacketService {
         return batches;
     }
 
-    public UpdateRequestDTO createUpdateRequest (List<String> updateDetailsInfo) {
-        LocalizedValue surnameValue = new LocalizedValue();
-        surnameValue.setLanguage("eng");
-        surnameValue.setValue(updateDetailsInfo.get(1));
-
-        LocalizedValue givenNameValue = new LocalizedValue();
-        givenNameValue.setLanguage("eng");
-        givenNameValue.setValue(updateDetailsInfo.get(2));
-
-        LocalizedValue otherNamesValue = new LocalizedValue();
-        otherNamesValue.setLanguage("eng");
-        otherNamesValue.setValue(updateDetailsInfo.get(3));
-
-        LocalizedValue genderValue = new LocalizedValue();
-        genderValue.setLanguage("eng");
-        genderValue.setValue(updateDetailsInfo.get(4));
-
+    public UpdateRequestDTO createUpdateRequest(List<String> updateDetailsInfo) {
         Identity identity = new Identity();
         identity.setIDSchemaVersion(8.4);
         identity.setNIN(updateDetailsInfo.get(0));
-        identity.setSurname(Collections.singletonList(surnameValue));
-        identity.setGivenName(Collections.singletonList(givenNameValue));
-        identity.setOtherNames(Collections.singletonList(otherNamesValue));
-        identity.setGender(Collections.singletonList(genderValue));
-        identity.setDateOfBirth(updateDetailsInfo.get(5));
+
+        if (isNotBlank(updateDetailsInfo.get(1))) {
+            LocalizedValue surnameValue = new LocalizedValue();
+            surnameValue.setLanguage("eng");
+            surnameValue.setValue(updateDetailsInfo.get(1));
+            identity.setSurname(Collections.singletonList(surnameValue));
+        }
+
+        if (isNotBlank(updateDetailsInfo.get(2))) {
+            LocalizedValue givenNameValue = new LocalizedValue();
+            givenNameValue.setLanguage("eng");
+            givenNameValue.setValue(updateDetailsInfo.get(2));
+            identity.setGivenName(Collections.singletonList(givenNameValue));
+        }
+
+        if (isNotBlank(updateDetailsInfo.get(3))) {
+            LocalizedValue otherNamesValue = new LocalizedValue();
+            otherNamesValue.setLanguage("eng");
+            otherNamesValue.setValue(updateDetailsInfo.get(3));
+            identity.setOtherNames(Collections.singletonList(otherNamesValue));
+        }
+
+        if (isNotBlank(updateDetailsInfo.get(4))) {
+            LocalizedValue genderValue = new LocalizedValue();
+            genderValue.setLanguage("eng");
+            genderValue.setValue(updateDetailsInfo.get(4));
+            identity.setGender(Collections.singletonList(genderValue));
+        }
+
+        if (isNotBlank(updateDetailsInfo.get(5))) {
+            identity.setDateOfBirth(updateDetailsInfo.get(5));
+        }
 
         RequestData requestData = new RequestData();
         requestData.setRegistrationId(generateRandom10DigitString());
@@ -374,6 +385,10 @@ public class PacketServiceImpl implements PacketService {
         updateRequestDto.setRequest(requestData);
 
         return updateRequestDto;
+    }
+
+    private boolean isNotBlank(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     public static String generateRandom10DigitString() {
