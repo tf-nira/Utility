@@ -342,26 +342,27 @@ public class PacketServiceImpl implements PacketService {
         identity.setIDSchemaVersion(8.4);
         identity.setNIN(updateDetailsInfo.get(0));
 
-        if (isNotBlank(updateDetailsInfo.get(1))) {
+        if (isNotNull(updateDetailsInfo.get(1))) {
             LocalizedValue surnameValue = new LocalizedValue();
             surnameValue.setLanguage("eng");
             surnameValue.setValue(updateDetailsInfo.get(1));
             identity.setSurname(Collections.singletonList(surnameValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(2))) {
+        if (isNotNull(updateDetailsInfo.get(2))) {
             LocalizedValue givenNameValue = new LocalizedValue();
             givenNameValue.setLanguage("eng");
             givenNameValue.setValue(updateDetailsInfo.get(2));
             identity.setGivenName(Collections.singletonList(givenNameValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(3))) {
+        if (isNotNull(updateDetailsInfo.get(3))) {
             LocalizedValue otherNamesValue = new LocalizedValue();
             otherNamesValue.setLanguage("eng");
             otherNamesValue.setValue(updateDetailsInfo.get(3));
             identity.setOtherNames(Collections.singletonList(otherNamesValue));
         }
+       
 
         if (isNotBlank(updateDetailsInfo.get(4))) {
             LocalizedValue genderValue = new LocalizedValue();
@@ -390,7 +391,9 @@ public class PacketServiceImpl implements PacketService {
     private boolean isNotBlank(String value) {
         return value != null && !value.trim().isEmpty();
     }
-
+    private boolean isNotNull(String value) {
+        return value != null;
+    }
     public static String generateRandom10DigitString() {
         SecureRandom secureRandom = new SecureRandom();
         long number = 1_000_000_000L + (long)(secureRandom.nextDouble() * 9_000_000_000L);
