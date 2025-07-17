@@ -52,4 +52,16 @@ public class PacketController {
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
     }
+    
+    @GetMapping("/compareData")
+    public ResponseEntity<String> compareData() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.comparePacketsFromPacketMgrAndIdRepo();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
 }
