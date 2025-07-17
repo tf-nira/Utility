@@ -3,7 +3,9 @@ package io.mosip.packet_utility.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opencsv.CSVReader;
+import com.opencsv.CSVReaderBuilder;
 import com.opencsv.CSVWriter;
+import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.opencsv.exceptions.CsvValidationException;
 import io.mosip.packet_utility.dto.*;
 import io.mosip.packet_utility.dto.ResponseWrapper;
@@ -22,7 +24,9 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.Writer;
@@ -36,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -527,4 +532,109 @@ public class PacketServiceImpl implements PacketService {
             return ninStatusDTO;
         }
     }
+
+	@Override
+	public void getDetailsFromIdRepo(String rid) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void getDetailsFromPacketManager(String rid) {
+		// TODO Auto-generated method stub
+		
+	}
+	
+	@Override
+	public void comparePacketsFromPacketMgrAndIdRepo() throws IOException {
+        Resource resource = new ClassPathResource("dataToCompare.csv");
+        List<RegistrationIdDto> dataFromCsv = readDataFromCSV(resource.getInputStream());  
+        Path outputPath = Paths.get(filepath, "rids_compare_result.csv");
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[] { "RenewalRid", "IdRepoRid","Status" });
+            csvWriter.flush();
+            List<CompletableFuture<CompareDataResultDto>> futures = dataFromCsv.stream()
+            	    .map(data -> CompletableFuture
+            	            .supplyAsync(() -> {
+            	                return compareData(data.getRenewalRid(), data.getIdRepoRid());
+            	            }, executor) 
+            	            .handle((resultDto, throwable) -> {
+            	                if (throwable != null) {
+            	                    System.err.println("Error checking RID " + data.getRenewalRid() + ": " + throwable.getMessage());
+            	                    return null; 
+            	                }
+            	                return resultDto; 
+            	            }))
+            	    .collect(Collectors.toList());
+            CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+            allOf.join();
+            for (CompletableFuture<CompareDataResultDto> future : futures) {
+            	CompareDataResultDto result = future.get();
+                csvWriter.writeNext(new String[] { result.getRenewalRid(), result.getIdRepoRid(),result.isStatus() ? "true" : "false" });
+            }
+            csvWriter.flush();
+
+        }catch (Exception e) {
+			
+		}        
+	}
+	
+	private CompareDataResultDto compareData(String renewalRid, String IdRepoRid) {
+		CompareDataResultDto result = new CompareDataResultDto();
+		result.setIdRepoRid(IdRepoRid);
+		result.setRenewalRid(renewalRid);
+			getDetailsFromIdRepo(IdRepoRid);
+			getDetailsFromPacketManager(renewalRid);
+			
+		result.setStatus(true);
+		return result;
+	}
+	
+	
+	
+	private List<RegistrationIdDto> readDataFromCSV(InputStream inputStream){
+		List<RegistrationIdDto> data = new ArrayList<>();
+		try (BufferedReader fileReader = new BufferedReader(new InputStreamReader(inputStream))) {
+
+            CSVReader reader = new CSVReaderBuilder(fileReader)
+                    .withSkipLines(0) // Start reading from the first line
+                    .withFieldAsNull(CSVReaderNullFieldIndicator.EMPTY_SEPARATORS) // Treat empty fields as null
+                    .build();
+            // 
+            String[] header = reader.readNext();
+            if (header == null) {
+                throw new IOException("CSV file is empty or has no header.");
+            }
+            
+            Map<String, Integer> headerMap = new java.util.HashMap<>();
+            for (int i = 0; i < header.length; i++) {
+                headerMap.put(header[i].trim().toLowerCase(), i);
+            }
+
+            
+            Integer renewalRidIndex = headerMap.get("RenewalRid");
+            Integer idRepoRidIndex = headerMap.get("IdRepoRid");
+
+            if (renewalRidIndex == null || idRepoRidIndex == null) {
+                throw new IOException("Required columns 'RenewalRid' or 'IdRepoRid' not found in the CSV header.");
+            }
+
+            String[] line;
+            while ((line = reader.readNext()) != null) {
+                try {
+                	RegistrationIdDto dataDto = new RegistrationIdDto();
+                	dataDto.setRenewalRid(line[renewalRidIndex]);
+                    dataDto.setIdRepoRid(line[idRepoRidIndex]);
+                    data.add(dataDto);
+                } catch (NumberFormatException e) {
+                    System.err.println("Skipping row due to invalid age format: " + Arrays.toString(line) + " - " + e.getMessage());
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    System.err.println("Skipping row due to malformed CSV line (not enough columns): " + Arrays.toString(line) + " - " + e.getMessage());
+                }
+            }
+        } catch (IOException | CsvValidationException e) {
+            throw new RuntimeException("Failed to parse CSV file: " + e.getMessage(), e);
+        }
+		return data;
+	}
 }
