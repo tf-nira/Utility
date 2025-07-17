@@ -10,8 +10,8 @@ public interface PacketService {
     public void getPacketNIN () throws Exception;
     public void getNINStatus () throws Exception;
     public void updateIdentity () throws  Exception;
-    public void getDetailsFromIdRepo(String rid);
-    public void getDetailsFromPacketManager(String rid);
+    public String getDetailsFromIdRepo(String rid);
+    public String getDetailsFromPacketManager(String rid);
     public void comparePacketsFromPacketMgrAndIdRepo() throws IOException;
     
 }

@@ -1,6 +1,7 @@
 package io.mosip.packet_utility.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
@@ -8,10 +9,15 @@ import com.opencsv.CSVWriter;
 import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.opencsv.exceptions.CsvValidationException;
 import io.mosip.packet_utility.dto.*;
-import io.mosip.packet_utility.dto.ResponseWrapper;
+import io.mosip.packet_utility.service.CbeffUtil;
 import io.mosip.packet_utility.service.PacketService;
+import io.mosip.kernel.biometrics.entities.BIR;
+import io.mosip.kernel.biometrics.entities.BiometricRecord;
+
 import io.mosip.kernel.core.util.JsonUtils;
 import io.mosip.kernel.core.util.StringUtils;
+
+import org.apache.commons.codec.binary.Base64;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -71,8 +77,14 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.mosip.output.file.path}")
     private String filepath;
+    
+    @Value("${io.mosip.packet.manager.get.biomterics.url}")
+    private String getBiometricsUrl;
 
     private final Executor executor = Executors.newFixedThreadPool(200);
+    
+	@Autowired
+	private CbeffUtil cbeffutil;
 
     @Override
     public void getPacketNIN() throws Exception {
@@ -534,13 +546,108 @@ public class PacketServiceImpl implements PacketService {
     }
 
 	@Override
-	public void getDetailsFromIdRepo(String rid) {
-		// TODO Auto-generated method stub
+	public String  getDetailsFromIdRepo(String rid) {
+		    String  bdbdata=null;
+	        String url = idRepoUrl + rid;
+            
+	        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "all");
+
+	        HttpHeaders headers = new HttpHeaders();
+	        headers.setContentType(MediaType.APPLICATION_JSON);
+	        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+	        try {
+	            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+	                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+	                    });
+
+	            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+	            String data = null;
+	            if (responseWrapper.getResponse() != null) {
+	            	List<Documents> docs=responseWrapper.getResponse().getDocuments();
+	            	for (int i = 0; i < docs.size(); i++) {
+	    				if (docs.get(i).getCategory().equalsIgnoreCase("individualBiometrics")) {
+	    					data = docs.get(i).getValue();
+	    					break;
+	    				}
+	    			}
+
+	            }
+            if(data!=null) {
+            	Map<String, String> bdbBasedOnFinger = cbeffutil.getBDBBasedOnType(Base64.decodeBase64(data), "Face",
+        				null);
+            	 bdbdata = bdbBasedOnFinger.values().iterator().next();
+            
+            }
+	           
+
+	        } catch (RestClientException e) {
+	            System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+	          
+	            return bdbdata;
+	        } catch (Exception e) {
+	        	 System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+		          
+		            return bdbdata;
+			}
+			return bdbdata;
 		
 	}
 
 	@Override
-	public void getDetailsFromPacketManager(String rid) {
+	public String getDetailsFromPacketManager(String rid) {
+		   String bdbData=null;
+		   List<String> modalities=new ArrayList<String>();
+		   modalities.add("Face");
+		  BiometricRequestDto fieldDto = new BiometricRequestDto(rid, "individualBiometrics", modalities, source, process, false);
+		   String url = getBiometricsUrl;
+	        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
+
+	        HttpHeaders headers = new HttpHeaders();
+	        headers.setContentType(MediaType.APPLICATION_JSON);
+	        
+	        RequestWrapper<BiometricRequestDto> request = new RequestWrapper<>();
+	        request.setRequest(fieldDto);
+
+	        HttpEntity<RequestWrapper<BiometricRequestDto>> entity = new HttpEntity<>(request, headers);
+
+	        try {
+	            ResponseEntity<ResponseWrapper<BiometricRecord>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+	                    HttpMethod.POST, entity, new ParameterizedTypeReference<ResponseWrapper<BiometricRecord>>() {
+	                    });
+
+	            ResponseWrapper<BiometricRecord> responseWrapper = responseEntity.getBody();
+	            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+	                System.out.println("Error for rid : " + rid + " from packet manager");
+	                return bdbData;
+	            }
+
+	            BiometricRecord biometricRecord = objectMapper.readValue(JsonUtils.javaObjectToJsonString(responseWrapper.getResponse()), BiometricRecord.class);
+	            for (BIR bir : biometricRecord.getSegments()) {
+	                if(bir.getBdbInfo().getType() != null) {
+	       				if(bir.getBdb()!=null) {
+	       					bdbData=Base64.encodeBase64String(bir.getBdb());
+	       				}
+	                }
+	       		}
+	        } catch (RestClientException e) {
+	        	 System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+		   
+		            return bdbData;
+	        } catch (JsonMappingException e) {
+	        	System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+	 		   
+	            return bdbData;
+			} catch (JsonProcessingException e) {
+				System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+				   
+	            return bdbData;
+			} catch (io.mosip.kernel.core.util.exception.JsonProcessingException e) {
+				System.err.println("Exception for rid " + rid + ": " + e.getMessage());
+				   
+	            return bdbData;
+			}
+		     return bdbData;
 		// TODO Auto-generated method stub
 		
 	}
@@ -575,7 +682,8 @@ public class PacketServiceImpl implements PacketService {
             csvWriter.flush();
 
         }catch (Exception e) {
-			
+        	System.err.println("Error checking RID "  + e.getMessage());
+       
 		}        
 	}
 	
@@ -583,10 +691,19 @@ public class PacketServiceImpl implements PacketService {
 		CompareDataResultDto result = new CompareDataResultDto();
 		result.setIdRepoRid(IdRepoRid);
 		result.setRenewalRid(renewalRid);
-			getDetailsFromIdRepo(IdRepoRid);
-			getDetailsFromPacketManager(renewalRid);
-			
-		result.setStatus(true);
+	     String dataFromIdrepo=getDetailsFromIdRepo(IdRepoRid);
+	     String dataFromPacketManager=getDetailsFromPacketManager(renewalRid);
+		if(dataFromIdrepo ==null || dataFromPacketManager== null) {
+			result.setStatus(true);
+		}else {
+           if(dataFromIdrepo.equalsIgnoreCase(dataFromPacketManager)) {
+        	   result.setStatus(true);
+                }
+           else {
+               result.setStatus(false);
+            }
+		}
+		System.out.println("RENEWAL rid  migration rid and status "  + result.getRenewalRid()+result.getIdRepoRid()+result.isStatus());
 		return result;
 	}
 	
@@ -612,8 +729,8 @@ public class PacketServiceImpl implements PacketService {
             }
 
             
-            Integer renewalRidIndex = headerMap.get("RenewalRid");
-            Integer idRepoRidIndex = headerMap.get("IdRepoRid");
+            Integer renewalRidIndex = headerMap.get("renewalrid");
+            Integer idRepoRidIndex = headerMap.get("idreporid");
 
             if (renewalRidIndex == null || idRepoRidIndex == null) {
                 throw new IOException("Required columns 'RenewalRid' or 'IdRepoRid' not found in the CSV header.");

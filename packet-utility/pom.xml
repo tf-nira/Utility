@@ -73,6 +73,11 @@
 			<artifactId>opencsv</artifactId>
 			<version>5.7.1</version>
 		</dependency>
+			<dependency>
+			<groupId>io.mosip.kernel</groupId>
+			<artifactId>kernel-cbeffutil-api</artifactId>
+			<version>1.2.0.1</version>
+		</dependency>
 	</dependencies>
 
 	<build>
