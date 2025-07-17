@@ -8,4 +8,5 @@ public class CompareDataResultDto {
 	private String renewalRid;
 	private String idRepoRid;
 	private boolean status;
+	private boolean error;
 }

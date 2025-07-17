@@ -658,7 +658,7 @@ public class PacketServiceImpl implements PacketService {
         List<RegistrationIdDto> dataFromCsv = readDataFromCSV(resource.getInputStream());  
         Path outputPath = Paths.get(filepath, "rids_compare_result.csv");
         try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
-            csvWriter.writeNext(new String[] { "RenewalRid", "IdRepoRid","Status" });
+            csvWriter.writeNext(new String[] { "RenewalRid", "IdRepoRid","Status","Error" });
             csvWriter.flush();
             List<CompletableFuture<CompareDataResultDto>> futures = dataFromCsv.stream()
             	    .map(data -> CompletableFuture
@@ -677,7 +677,7 @@ public class PacketServiceImpl implements PacketService {
             allOf.join();
             for (CompletableFuture<CompareDataResultDto> future : futures) {
             	CompareDataResultDto result = future.get();
-                csvWriter.writeNext(new String[] { result.getRenewalRid(), result.getIdRepoRid(),result.isStatus() ? "true" : "false" });
+                csvWriter.writeNext(new String[] { result.getRenewalRid(), result.getIdRepoRid(),result.isStatus() ? "true" : "false",result.isError() ? "true" : "false" });
             }
             csvWriter.flush();
 
@@ -694,7 +694,7 @@ public class PacketServiceImpl implements PacketService {
 	     String dataFromIdrepo=getDetailsFromIdRepo(IdRepoRid);
 	     String dataFromPacketManager=getDetailsFromPacketManager(renewalRid);
 		if(dataFromIdrepo ==null || dataFromPacketManager== null) {
-			result.setStatus(true);
+			result.setError(true);
 		}else {
            if(dataFromIdrepo.equalsIgnoreCase(dataFromPacketManager)) {
         	   result.setStatus(true);
