@@ -6,8 +6,12 @@ import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.PropertySource;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
+
+import io.mosip.commons.khazana.impl.S3Adapter;
+import io.mosip.commons.khazana.spi.ObjectStoreAdapter;
 
 import java.util.concurrent.TimeUnit;
 
@@ -35,4 +39,9 @@ public class RestTemplateConfig {
 
         return new RestTemplate(factory);
     }
+    
+    @Bean
+	public ObjectStoreAdapter objectStoreAdapter() {
+		return new S3Adapter();
+	}
 }

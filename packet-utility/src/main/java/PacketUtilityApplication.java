@@ -1,4 +1,4 @@
-package io.mosip.packet_utility;
+
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
