@@ -16,7 +16,7 @@ public interface RegistrationRepository extends JpaRepository<RegistrationEntity
     @Modifying
     @Transactional
     @Query(value = "UPDATE regprc.registration SET status_code = 'PROCESSING' WHERE status_code = 'RESUMABLE' AND reg_stage_name IN ('MVSStage','ManualAdjudicationStage')", nativeQuery = true)
-    int updateStatusCodes ();
+    void updateStatusCodes ();
 
     @Query(value = "SELECT r.status_code AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r GROUP BY r.status_code", nativeQuery = true)
     List<StatusCodeCountProjection> getStatusCodeCount ();
