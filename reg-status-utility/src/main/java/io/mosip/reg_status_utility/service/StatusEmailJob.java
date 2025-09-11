@@ -1,6 +1,7 @@
 package io.mosip.reg_status_utility.service;
 
 import io.mosip.reg_status_utility.dto.StatusCodeCountProjection;
+import io.mosip.reg_status_utility.repository.CredentialRepository;
 import io.mosip.reg_status_utility.repository.RegistrationRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,9 @@ public class StatusEmailJob {
 
     @Autowired
     private RegistrationRepository registrationRepository;
+
+    @Autowired
+    private CredentialRepository credentialRepository;
 
     @Autowired
     private EmailService emailService;
