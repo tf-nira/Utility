@@ -1,5 +1,7 @@
 package io.mosip.reg_status_utility.config;
 
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -12,6 +14,7 @@ import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 
 @Configuration
@@ -22,27 +25,33 @@ import javax.sql.DataSource;
         transactionManagerRef = "primaryTransactionManager"
 )
 public class PrimaryDBConfig {
-
     @Primary
-    @Bean(name = "primaryDataSource")
-    @ConfigurationProperties(prefix = "spring.datasource")
-    public DataSource primaryDataSource() {
-        return DataSourceBuilder.create().build();
+    @Bean(name = "primaryDataSourceProperties")
+    @ConfigurationProperties(prefix = "spring.datasource.registration")
+    public DataSourceProperties primaryDataSourceProperties(){
+        return new DataSourceProperties();
     }
 
     @Primary
-    @Bean(name = "primaryEntityManagerFactory")
-    public LocalContainerEntityManagerFactoryBean primaryEntityManagerFactory(EntityManagerFactoryBuilder builder) {
+    @Bean(name = "primaryDataSource")
+    @ConfigurationProperties(prefix = "spring.datasource.registration")
+    public DataSource primaryDataSource(@Qualifier("primaryDataSourceProperties") DataSourceProperties properties) {
+        return properties.initializeDataSourceBuilder().build();
+    }
+
+    @Primary
+    @Bean(name = {"primaryEntityManagerFactory" , "entityManagerFactory"})
+    public LocalContainerEntityManagerFactoryBean primaryEntityManagerFactory(@Qualifier("primaryDataSource") DataSource dataSource, EntityManagerFactoryBuilder builder) {
         return builder
-                .dataSource(primaryDataSource())
+                .dataSource(dataSource)
                 .packages("io.mosip.reg_status_utility.entity")
                 .persistenceUnit("primary")
                 .build();
     }
 
     @Primary
-    @Bean(name = "primaryTransactionManager")
-    public PlatformTransactionManager primaryTransactionManager(EntityManagerFactoryBuilder builder) {
-        return new JpaTransactionManager(primaryEntityManagerFactory(builder).getObject());
+    @Bean(name = {"primaryTransactionManager" , "transactionManager"})
+    public PlatformTransactionManager primaryTransactionManager(@Qualifier("primaryEntityManagerFactory")EntityManagerFactory factory, EntityManagerFactoryBuilder builder) {
+        return new JpaTransactionManager(factory);
     }
 }

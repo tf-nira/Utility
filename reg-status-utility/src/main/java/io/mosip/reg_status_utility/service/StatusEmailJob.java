@@ -1,5 +1,6 @@
 package io.mosip.reg_status_utility.service;
 
+import io.mosip.reg_status_utility.dto.CredentialProjection;
 import io.mosip.reg_status_utility.dto.StatusCodeCountProjection;
 import io.mosip.reg_status_utility.repository.CredentialRepository;
 import io.mosip.reg_status_utility.repository.RegistrationRepository;
@@ -9,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import java.io.*;
@@ -52,8 +54,15 @@ public class StatusEmailJob {
         }
     }
 
+    @Transactional("credentialTransactionManager")
     @Scheduled(cron = "${mosip.send.status.cron.expression}")
     public void sendStatusReport () {
+        System.out.println("Abhay Dev Gautam");
+        List<CredentialProjection> results = credentialRepository.findAllCredentialIdAndStatusCode();
+
+        for(CredentialProjection row : results){
+            System.out.println("Credential ID : " + row.getCredentialId() + "Status Code :" + row.getStatusCode());
+        }
         registrationRepository.updateStatusCodes();
         List<StatusCodeCountProjection> data = registrationRepository.getStatusCodeCount();
 
@@ -162,5 +171,4 @@ public class StatusEmailJob {
         }
         return map;
     }
-
 }

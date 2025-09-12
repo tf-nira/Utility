@@ -1,5 +1,7 @@
 package io.mosip.reg_status_utility.config;
 
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -11,7 +13,9 @@ import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
+import javax.xml.crypto.Data;
 import java.util.HashMap;
 
 @Configuration
@@ -23,23 +27,29 @@ import java.util.HashMap;
 )
 public class CredentialDBConfig {
 
+    @Bean(name = "credentialDataSourceProperties")
+    @ConfigurationProperties(prefix = "spring.datasource.credential")
+    public DataSourceProperties credentialDataSourceProperties (){
+        return new DataSourceProperties();
+    }
+
     @Bean(name = "credentialDataSource")
     @ConfigurationProperties(prefix = "spring.datasource.credential")
-    public DataSource credentialDataSource() {
+    public DataSource credentialDataSource(@Qualifier("credentialDataSourceProperties")DataSourceProperties properties) {
         return DataSourceBuilder.create().build();
     }
 
     @Bean(name = "credentialEntityManagerFactory")
-    public LocalContainerEntityManagerFactoryBean credentialEntityManagerFactory(EntityManagerFactoryBuilder builder) {
+    public LocalContainerEntityManagerFactoryBean credentialEntityManagerFactory(@Qualifier("credentialDataSource") DataSource dataSource ,EntityManagerFactoryBuilder builder) {
         return builder
-                .dataSource(credentialDataSource())
+                .dataSource(dataSource)
                 .packages("io.mosip.reg_status_utility.entity")
                 .persistenceUnit("credential")
                 .build();
     }
 
     @Bean(name = "credentialTransactionManager")
-    public PlatformTransactionManager credentialTransactionManager(EntityManagerFactoryBuilder builder) {
-        return new JpaTransactionManager(credentialEntityManagerFactory(builder).getObject());
+    public PlatformTransactionManager credentialTransactionManager(@Qualifier("credentialEntityManagerFactory") EntityManagerFactory factory, EntityManagerFactoryBuilder builder) {
+        return new JpaTransactionManager(factory);
     }
 }
