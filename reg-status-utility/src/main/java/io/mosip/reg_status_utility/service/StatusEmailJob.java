@@ -22,6 +22,7 @@ import java.nio.file.Paths;
 import java.nio.file.Files;
 import java.sql.Date;
 import java.sql.Time;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +43,9 @@ public class StatusEmailJob {
     @Value("#{'${recipient.emails}'.split(',')}")
     private List<String> recipients;
 
+    @Value("${mosip.send.status.expected.interval.minutes}")
+    private long expectedIntervalMinutes;
+
     private Map<String, Long> prevCount;
 
     private static final String STATE_FILE_PATH = "reg_status_prev_count.txt";
@@ -57,12 +61,12 @@ public class StatusEmailJob {
     @Transactional("credentialTransactionManager")
     @Scheduled(cron = "${mosip.send.status.cron.expression}")
     public void sendStatusReport () {
-        System.out.println("Abhay Dev Gautam");
-        List<CredentialProjection> results = credentialRepository.findAllCredentialIdAndStatusCode();
-
-        for(CredentialProjection row : results){
-            System.out.println("Credential ID : " + row.getCredentialId() + "Status Code :" + row.getStatusCode());
-        }
+//        System.out.println("Abhay Dev Gautam");
+//        List<CredentialProjection> results = credentialRepository.findAllCredentialIdAndStatusCode();
+//
+//        for(CredentialProjection row : results){
+//            System.out.println("Credential ID : " + row.getCredentialId() + "Status Code :" + row.getStatusCode());
+//        }
         registrationRepository.updateStatusCodes();
         List<StatusCodeCountProjection> data = registrationRepository.getStatusCodeCount();
 
@@ -128,6 +132,9 @@ public class StatusEmailJob {
             }
             Path temp = Files.createTempFile(parent != null ? parent : Paths.get("."), "reg_state", ".tmp");
             try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8, StandardOpenOption.WRITE)) {
+                writer.write("TIMESTAMP=" + java.time.LocalDateTime.now());
+                writer.newLine();
+
                 for (Map.Entry<String, Long> e : mapToSave.entrySet()) {
                     writer.write(e.getKey() + "=" + e.getValue());
                     writer.newLine();
@@ -150,25 +157,41 @@ public class StatusEmailJob {
         Map<String, Long> map = new HashMap<>();
         try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String line;
+            LocalDateTime savedTime = null;
+
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split("=", 2);
                 if (parts.length != 2) {
                     log.warn("Skipping malformed line in state file: {}", line);
                     continue;
                 }
-                String key = parts[0].trim();
-                String valStr = parts[1].trim();
+
+                if ("TIMESTAMP".equals(parts[0].trim())) {
+                    try {
+                        savedTime = LocalDateTime.parse(parts[1].trim());
+                    } catch (Exception e) {
+                        log.warn("Invalid timestamp in state file: {}", parts[1]);
+                    }
+                    continue;
+                }
+
                 try {
-                    long value = Long.parseLong(valStr);
-                    map.put(key, value);
+                    map.put(parts[0].trim(), Long.parseLong(parts[1].trim()));
                 } catch (NumberFormatException nfe) {
-                    log.warn("Skipping line with invalid number '{}': {}", valStr, line);
+                    log.warn("Skipping line with invalid number '{}': {}", parts[1], line);
                 }
             }
+            if (savedTime == null ||
+                    java.time.Duration.between(savedTime, LocalDateTime.now()).toMinutes() > expectedIntervalMinutes) {
+                log.warn("State file is outdated (gap > {} minutes). Resetting previous count.", expectedIntervalMinutes);
+                return null;
+            }
+
         } catch (IOException e) {
             log.error("Failed to load state from file {}", STATE_FILE_PATH, e);
             return null;
         }
         return map;
     }
+
 }
