@@ -1,4 +1,4 @@
-package io.mosip.reg_status_utility.entity;
+package io.mosip.reg_status_utility.entity.regprc;
 
 import lombok.Data;
 

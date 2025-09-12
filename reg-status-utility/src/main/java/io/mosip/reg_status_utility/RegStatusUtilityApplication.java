@@ -10,8 +10,8 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @SpringBootApplication
 @EnableScheduling
-@EnableJpaRepositories(basePackages = "io.mosip.reg_status_utility.repository")
-@EntityScan(basePackages = "io.mosip.reg_status_utility.entity")
+//@EnableJpaRepositories(basePackages = {"io.mosip.reg_status_utility.repository.credential","io.mosip.reg_status_utility.repository.regprc"})
+//@EntityScan(basePackages = {"io.mosip.reg_status_utility.entity.credential","io.mosip.reg_status_utility.entity.regprc"})
 @ComponentScan(basePackages = {"io.mosip.*", "${mosip.auth.adapter.impl.basepackage}"})
 @EnableTransactionManagement
 public class RegStatusUtilityApplication {

@@ -2,8 +2,8 @@ package io.mosip.reg_status_utility.service;
 
 import io.mosip.reg_status_utility.dto.CredentialProjection;
 import io.mosip.reg_status_utility.dto.StatusCodeCountProjection;
-import io.mosip.reg_status_utility.repository.CredentialRepository;
-import io.mosip.reg_status_utility.repository.RegistrationRepository;
+import io.mosip.reg_status_utility.repository.credential.CredentialRepository;
+import io.mosip.reg_status_utility.repository.regprc.RegistrationRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;

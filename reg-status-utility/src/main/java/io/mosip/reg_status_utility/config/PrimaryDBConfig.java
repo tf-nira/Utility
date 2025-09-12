@@ -20,7 +20,7 @@ import javax.sql.DataSource;
 @Configuration
 @EnableTransactionManagement
 @EnableJpaRepositories(
-        basePackages = "io.mosip.reg_status_utility.repository",
+        basePackages = "io.mosip.reg_status_utility.repository.regprc",
         entityManagerFactoryRef = "primaryEntityManagerFactory",
         transactionManagerRef = "primaryTransactionManager"
 )
@@ -44,7 +44,7 @@ public class PrimaryDBConfig {
     public LocalContainerEntityManagerFactoryBean primaryEntityManagerFactory(@Qualifier("primaryDataSource") DataSource dataSource, EntityManagerFactoryBuilder builder) {
         return builder
                 .dataSource(dataSource)
-                .packages("io.mosip.reg_status_utility.entity")
+                .packages("io.mosip.reg_status_utility.entity.regprc")
                 .persistenceUnit("primary")
                 .build();
     }

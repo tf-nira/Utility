@@ -1,7 +1,7 @@
-package io.mosip.reg_status_utility.repository;
+package io.mosip.reg_status_utility.repository.regprc;
 
 import io.mosip.reg_status_utility.dto.StatusCodeCountProjection;
-import io.mosip.reg_status_utility.entity.RegistrationEntity;
+import io.mosip.reg_status_utility.entity.regprc.RegistrationEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;

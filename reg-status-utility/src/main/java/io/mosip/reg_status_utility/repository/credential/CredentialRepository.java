@@ -1,7 +1,7 @@
-package io.mosip.reg_status_utility.repository;
+package io.mosip.reg_status_utility.repository.credential;
 
 import io.mosip.reg_status_utility.dto.CredentialProjection;
-import io.mosip.reg_status_utility.entity.CredentialEntity;
+import io.mosip.reg_status_utility.entity.credential.CredentialEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
