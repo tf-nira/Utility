@@ -41,6 +41,20 @@ public class PacketController {
         });
         return ResponseEntity.ok("NIN extraction started with batch processing.");
     }
+    
+    @GetMapping("/getcentreandopid")
+    public ResponseEntity<String>  getPacketCentreAndOperator() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getPacketCentreAndOperator();
+
+            } catch (Exception e) {
+                System.err.println("Error in async batch NIN processing: " +e.getMessage());
+                e.printStackTrace();
+            }
+        });
+        return ResponseEntity.ok("centre and operational data extration started.");
+    }
 
     @GetMapping("/ninstatus")
     public ResponseEntity<String> checkNINStatus() throws Exception {

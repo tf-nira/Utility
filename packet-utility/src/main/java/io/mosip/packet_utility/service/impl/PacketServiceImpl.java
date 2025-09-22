@@ -2,12 +2,14 @@ package io.mosip.packet_utility.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
 import com.opencsv.CSVWriter;
 import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.opencsv.exceptions.CsvValidationException;
+import io.mosip.kernel.core.util.DateUtils;
 import io.mosip.packet_utility.dto.*;
 import io.mosip.packet_utility.service.CbeffUtil;
 import io.mosip.packet_utility.service.PacketService;
@@ -18,6 +20,7 @@ import io.mosip.kernel.core.util.JsonUtils;
 import io.mosip.kernel.core.util.StringUtils;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.collections.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -69,6 +72,9 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
 
+    @Value("${io.moisp.packet.manager.search.metainfo.url}")
+    private String metaInfoUrl;
+
     @Value("${io.mosip.id.repo.fetch.nin-details.url}")
     private String idRepoUrl;
 
@@ -80,6 +86,7 @@ public class PacketServiceImpl implements PacketService {
     
     @Value("${io.mosip.packet.manager.get.biomterics.url}")
     private String getBiometricsUrl;
+
 
     private final Executor executor = Executors.newFixedThreadPool(200);
     
@@ -149,6 +156,71 @@ public class PacketServiceImpl implements PacketService {
         }
 
         System.out.println("NIN status check completed successfully");
+    }
+
+    @Override
+    public void getPacketCentreAndOperator() throws Exception {
+        List<String> ninList = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(ninList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "cntr-opid.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(new String[] { "RID","CENTRE", "OPERATORID","SUPERVISORID" });
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninList.size() + " RIDs in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<CenterResultDTO>> futures = batch.stream().map(rid -> CompletableFuture
+                        .supplyAsync(() -> getcentrandid(rid), executor).handle((centerResultDTO, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking RID " + rid + ": " + throwable.getMessage());
+                            }
+                            return centerResultDTO;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<CenterResultDTO> future : futures) {
+                        CenterResultDTO result = future.get();
+                        csvWriter.writeNext(new String[] { result.getRid(), result.getCntr() , result.getOpid() , result.getSupid() });
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("center and operational data extraction completed successfully");
     }
 
     @Override
@@ -464,6 +536,124 @@ public class PacketServiceImpl implements PacketService {
             System.err.println("Exception for RID " + rid + ": " + e.getMessage());
             ninResultDTO.setNin(e.getMessage());
             return ninResultDTO;
+        } catch (JsonProcessingException | io.mosip.kernel.core.util.exception.JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public CenterResultDTO  getcentrandid (String rid) {
+        CenterResultDTO centerResultDTO = new CenterResultDTO();
+        centerResultDTO.setRid(rid);
+        //process needs to be changed accordingly
+        InfoDto fieldDto = new InfoDto(rid, source, process, false);
+        RequestWrapper<InfoDto> request = new RequestWrapper<>();
+        request.setId(rid);
+        request.setVersion("v1");
+        request.setRequesttime(DateUtils.getUTCCurrentDateTime());
+        request.setRequest(fieldDto);
+        String url = metaInfoUrl;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<RequestWrapper<InfoDto>> entity = new HttpEntity<>(request, headers);
+        try {
+            ResponseEntity<ResponseWrapper<FieldResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.POST, entity, new ParameterizedTypeReference<ResponseWrapper<FieldResponseDTO>>() {
+                    });
+
+            ResponseWrapper<FieldResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                System.out.println("rid : " + rid + " packetmanager failed");
+                centerResultDTO.setCntr(responseWrapper.getErrors().get(0).getMessage());
+                centerResultDTO.setOpid(responseWrapper.getErrors().get(0).getMessage());
+                centerResultDTO.setSupid(responseWrapper.getErrors().get(0).getMessage());
+                return centerResultDTO;
+            }
+
+            FieldResponseDTO fieldResponseDto = objectMapper.readValue(JsonUtils.javaObjectToJsonString(responseWrapper.getResponse()), FieldResponseDTO.class);
+            if (fieldResponseDto != null) {
+//                String cntr = fieldResponseDto.getFields().get("operationsData");
+//
+//                String opid = fieldResponseDto.getFields().get("officerId");
+//                centerResultDTO.setCntr(cntr);
+//                centerResultDTO.setOpid(opid);
+                ObjectMapper objectMapper = new ObjectMapper();
+                JsonNode rootNode = objectMapper.valueToTree(fieldResponseDto.getFields());
+
+// Extract officerId directly from operationsData
+                JsonNode operationsDataNode = rootNode.get("operationsData");
+                String opid = null;
+                String supid = null;
+                if (operationsDataNode != null && operationsDataNode.isTextual()) {
+                    try {
+                        // Parse the text content as JSON
+                        String operationsDataText = operationsDataNode.asText();
+                        JsonNode parsedOperationsData = objectMapper.readTree(operationsDataText);
+
+                        // Now iterate through the parsed JSON array
+                        if (parsedOperationsData.isArray()) {
+                            for (JsonNode item : parsedOperationsData) {
+                                if ("officerId".equals(item.get("label").asText())) {
+                                    opid = item.get("value").asText();
+                                    break;
+                                }
+                            }
+                        }
+                        if (parsedOperationsData.isArray()) {
+                            for (JsonNode item : parsedOperationsData) {
+                                if ("supervisorId".equals(item.get("label").asText())) {
+                                    supid = item.get("value").asText();
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (JsonProcessingException e) {
+                        System.err.println("Error parsing operationsData JSON: " + e.getMessage());
+                    }
+                }
+
+// Extract centerId directly from metadata
+                JsonNode metadataNode = rootNode.get("metaData");
+                String cntr = null;
+                if (metadataNode != null && metadataNode.isTextual()) {
+                    try {
+                        // Parse the text content as JSON
+                        String metaDataText = metadataNode.asText();
+                        JsonNode parsedOperationsData2 = objectMapper.readTree(metaDataText);
+
+                        // Now iterate through the parsed JSON array
+                        if (parsedOperationsData2.isArray()) {
+                            for (JsonNode item : parsedOperationsData2) {
+                                if ("centerId".equals(item.get("label").asText())) {
+                                    cntr = item.get("value").asText();
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (JsonProcessingException e) {
+                        System.err.println("Error parsing operationsData JSON: " + e.getMessage());
+                    }
+                }
+
+// Set DTO
+//                centerResultDTO.setOpid(opid);
+//                centerResultDTO.setSupid(supid);
+//                centerResultDTO.setCntr(cntr);
+                centerResultDTO.setOpid(opid != null ? opid.toLowerCase() : "null");
+                centerResultDTO.setSupid(supid != null ? supid.toLowerCase() : "null");
+                centerResultDTO.setCntr(cntr != null ? cntr : "null");
+
+
+            }
+
+            return centerResultDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            centerResultDTO.setCntr(e.getMessage());
+            centerResultDTO.setOpid(e.getMessage());
+            return centerResultDTO;
         } catch (JsonProcessingException | io.mosip.kernel.core.util.exception.JsonProcessingException e) {
             throw new RuntimeException(e);
         }
