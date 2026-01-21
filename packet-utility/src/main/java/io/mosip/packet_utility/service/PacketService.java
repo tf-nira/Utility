@@ -8,4 +8,5 @@ public interface PacketService {
     public void getPacketNIN () throws Exception;
     public void getNINStatus () throws Exception;
     public void updateIdentity () throws  Exception;
+    public void getResidenceStatus() throws  Exception;
 }

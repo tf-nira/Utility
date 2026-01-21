@@ -23,4 +23,5 @@ public class Identity {
     private List<LocalizedValue> otherNames;
     private List<LocalizedValue> gender;
     private String dateOfBirth;
+    private List<LocalizedValue> residenceStatus;
 }

@@ -2,6 +2,7 @@ package io.mosip.packet_utility.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
 import com.opencsv.exceptions.CsvValidationException;
@@ -58,6 +59,12 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
 
+    @Value("${io.moisp.packet.manager.search.multi.fields.url}")
+    private String searchMultiFieldUrl;
+
+    @Value("${i0.mosip.packet.manager.info.url}")
+    private String packetInfo;
+
     @Value("${io.mosip.id.repo.fetch.nin-details.url}")
     private String idRepoUrl;
 
@@ -81,7 +88,7 @@ public class PacketServiceImpl implements PacketService {
         try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
 
             // Write header
-            csvWriter.writeNext(new String[] { "REG_ID", "NIN" });
+            csvWriter.writeNext(new String[]{"REG_ID", "NIN"});
             csvWriter.flush();
 
             System.out.println("Processing " + ninList.size() + " RIDs in " + batches.size() + " batches");
@@ -110,7 +117,7 @@ public class PacketServiceImpl implements PacketService {
                     // Write results for this batch
                     for (CompletableFuture<NINResultDTO> future : futures) {
                         NINResultDTO result = future.get();
-                        csvWriter.writeNext(new String[] { result.getRid(), result.getNin() });
+                        csvWriter.writeNext(new String[]{result.getRid(), result.getNin()});
                     }
                     csvWriter.flush();
 
@@ -146,7 +153,7 @@ public class PacketServiceImpl implements PacketService {
         try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
 
             // Write header
-            csvWriter.writeNext(new String[] { "NIN", "STATUS" });
+            csvWriter.writeNext(new String[]{"NIN", "STATUS"});
             csvWriter.flush();
 
             System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
@@ -175,7 +182,7 @@ public class PacketServiceImpl implements PacketService {
                     // Write results for this batch
                     for (CompletableFuture<NinStatusDTO> future : futures) {
                         NinStatusDTO result = future.get();
-                        csvWriter.writeNext(new String[] { result.getNin(), result.getStatus() });
+                        csvWriter.writeNext(new String[]{result.getNin(), result.getStatus()});
                     }
                     csvWriter.flush();
 
@@ -200,7 +207,7 @@ public class PacketServiceImpl implements PacketService {
     }
 
     @Override
-    public void updateIdentity() throws  Exception {
+    public void updateIdentity() throws Exception {
         List<List<String>> ninList = readMultiFieldCSV();
 
         int batchSize = 25;
@@ -211,7 +218,7 @@ public class PacketServiceImpl implements PacketService {
         try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
 
             // Write header
-            csvWriter.writeNext(new String[] { "NIN", "STATUS" });
+            csvWriter.writeNext(new String[]{"NIN", "STATUS"});
             csvWriter.flush();
 
             System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
@@ -241,7 +248,7 @@ public class PacketServiceImpl implements PacketService {
                     // Write results for this batch
                     for (CompletableFuture<NinStatusDTO> future : futures) {
                         NinStatusDTO result = future.get();
-                        csvWriter.writeNext(new String[] { result.getNin(), result.getStatus() });
+                        csvWriter.writeNext(new String[]{result.getNin(), result.getStatus()});
                     }
                     csvWriter.flush();
 
@@ -265,7 +272,7 @@ public class PacketServiceImpl implements PacketService {
         System.out.println("NIN update completed successfully");
     }
 
-    public List<String> readNINsFromCSV (boolean getNin) throws IOException, CsvValidationException {
+    public List<String> readNINsFromCSV(boolean getNin) throws IOException, CsvValidationException {
 
         String fileName = "";
         if (getNin) fileName = "rids.csv";
@@ -339,30 +346,30 @@ public class PacketServiceImpl implements PacketService {
 
     public UpdateRequestDTO createUpdateRequest(List<String> updateDetailsInfo) {
         Identity identity = new Identity();
-        identity.setIDSchemaVersion(8.4);
+        identity.setIDSchemaVersion(8.7);
         identity.setNIN(updateDetailsInfo.get(0));
 
-        if (isNotNull(updateDetailsInfo.get(1))) {
+        if (isNotBlank(updateDetailsInfo.get(1))) {
             LocalizedValue surnameValue = new LocalizedValue();
             surnameValue.setLanguage("eng");
             surnameValue.setValue(updateDetailsInfo.get(1));
             identity.setSurname(Collections.singletonList(surnameValue));
         }
 
-        if (isNotNull(updateDetailsInfo.get(2))) {
+        if (isNotBlank(updateDetailsInfo.get(2))) {
             LocalizedValue givenNameValue = new LocalizedValue();
             givenNameValue.setLanguage("eng");
             givenNameValue.setValue(updateDetailsInfo.get(2));
             identity.setGivenName(Collections.singletonList(givenNameValue));
         }
 
-        if (isNotNull(updateDetailsInfo.get(3))) {
+        if (isNotBlank(updateDetailsInfo.get(3))) {
             LocalizedValue otherNamesValue = new LocalizedValue();
             otherNamesValue.setLanguage("eng");
             otherNamesValue.setValue(updateDetailsInfo.get(3));
             identity.setOtherNames(Collections.singletonList(otherNamesValue));
         }
-       
+
 
         if (isNotBlank(updateDetailsInfo.get(4))) {
             LocalizedValue genderValue = new LocalizedValue();
@@ -373,6 +380,12 @@ public class PacketServiceImpl implements PacketService {
 
         if (isNotBlank(updateDetailsInfo.get(5))) {
             identity.setDateOfBirth(updateDetailsInfo.get(5));
+        }
+        if (isNotBlank(updateDetailsInfo.get(6))) {
+            LocalizedValue residenceStatusValue = new LocalizedValue();
+            residenceStatusValue.setLanguage("eng");
+            residenceStatusValue.setValue(updateDetailsInfo.get(6));
+            identity.setResidenceStatus(Collections.singletonList(residenceStatusValue));
         }
 
         RequestData requestData = new RequestData();
@@ -391,16 +404,18 @@ public class PacketServiceImpl implements PacketService {
     private boolean isNotBlank(String value) {
         return value != null && !value.trim().isEmpty();
     }
+
     private boolean isNotNull(String value) {
         return value != null;
     }
+
     public static String generateRandom10DigitString() {
         SecureRandom secureRandom = new SecureRandom();
-        long number = 1_000_000_000L + (long)(secureRandom.nextDouble() * 9_000_000_000L);
+        long number = 1_000_000_000L + (long) (secureRandom.nextDouble() * 9_000_000_000L);
         return String.valueOf(number);
     }
 
-    public NINResultDTO getNIN (String rid) {
+    public NINResultDTO getNIN(String rid) {
         NINResultDTO ninResultDTO = new NINResultDTO();
         ninResultDTO.setRid(rid);
 
@@ -525,6 +540,133 @@ public class PacketServiceImpl implements PacketService {
             System.err.println("Exception for NIN " + updateDetailsInfo.get(0) + ": " + e.getMessage());
             ninStatusDTO.setStatus(e.getMessage());
             return ninStatusDTO;
+        }
+    }
+
+    @Override
+    public void getResidenceStatus() throws Exception {
+
+        List<String> ninList = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(ninList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "residence_status_report.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(new String[]{"RID", "NIN","Status"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninList.size() + " Residence status in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<RidNinStatusDTO>> futures = batch.stream().map(rid -> CompletableFuture
+                        .supplyAsync(() -> getResidence(rid), executor).handle((ridNinStatusDTO, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking Rid " + rid + ": " + throwable.getMessage());
+                            }
+                            return ridNinStatusDTO;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<RidNinStatusDTO> future : futures) {
+                        RidNinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[]{result.getRid(),result.getNin(), result.getStatus()});
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("Residence status status check completed successfully");
+
+    }
+    public RidNinStatusDTO getResidence(String rid) {
+        RidNinStatusDTO ridNinStatusDTO = new RidNinStatusDTO();
+        ridNinStatusDTO.setRid(rid);
+
+        String handle = rid;
+        String url = idRepoUrl + handle;
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+                    });
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getResponse() != null) {
+
+                NINStatusResponseDTO response = responseWrapper.getResponse();
+
+                // Convert identity to JSON object
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode identityJson = mapper.valueToTree(response.getIdentity());
+
+                ridNinStatusDTO.setNin(identityJson.get("NIN").asText());
+
+                if (identityJson.hasNonNull("residenceStatus") &&
+                        !identityJson.get("residenceStatus").isEmpty()) {
+                    ridNinStatusDTO.setStatus("Residence status already present");
+                }
+                else if (identityJson.hasNonNull("applicantForeignResidenceCountry") &&
+                        !identityJson.get("applicantForeignResidenceCountry").isEmpty()) {
+                    ridNinStatusDTO.setStatus("Outside Uganda");
+                }
+                else if (identityJson.hasNonNull("applicantPlaceOfResidenceCounty") &&
+                        !identityJson.get("applicantPlaceOfResidenceCounty").isEmpty()) {
+                    ridNinStatusDTO.setStatus("In Uganda");
+                }
+                else {
+                    // Default fallback if none of the above fields are present
+                    ridNinStatusDTO.setStatus("EXIST_IN_IDREPO");
+                }
+            }
+
+            else {
+                ridNinStatusDTO.setStatus("Does not Exist");
+            }
+
+            return ridNinStatusDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            ridNinStatusDTO.setStatus(e.getMessage());
+            return ridNinStatusDTO;
         }
     }
 }
