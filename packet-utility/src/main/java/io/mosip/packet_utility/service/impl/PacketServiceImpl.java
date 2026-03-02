@@ -31,7 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
-import java.time.Instant;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,11 +59,8 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
 
-    @Value("${io.moisp.packet.manager.search.multi.fields.url}")
-    private String searchMultiFieldUrl;
-
-    @Value("${i0.mosip.packet.manager.info.url}")
-    private String packetInfo;
+    @Value("${io.moisp.packet.manager.metaInfo}")
+    private String metainfo;
 
     @Value("${io.mosip.id.repo.fetch.nin-details.url}")
     private String idRepoUrl;
@@ -73,6 +70,8 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.mosip.output.file.path}")
     private String filepath;
+
+    private Boolean allField =false;
 
     private final Executor executor = Executors.newFixedThreadPool(200);
 
@@ -299,7 +298,153 @@ public class PacketServiceImpl implements PacketService {
         return list;
     }
 
-    public List<List<String>> readMultiFieldCSV() throws IOException, CsvValidationException {
+    @Override
+    public void getAge() throws Exception {
+
+        int batchSize = 25;
+        String fileName = "pausedApplication.csv";
+
+        List<String[]> inputList = new ArrayList<>();
+
+        // -------- READ INPUT CSV --------
+        Resource resource = new ClassPathResource(fileName);
+
+        try (Reader fileReader = new InputStreamReader(resource.getInputStream());
+             CSVReader reader = new CSVReader(fileReader)) {
+
+            String[] line;
+            while ((line = reader.readNext()) != null) {
+                if (line.length < 2) continue;
+
+                String regId = line[0].trim();
+                String process = line[1].trim();
+
+                if (StringUtils.isNotEmpty(regId) && StringUtils.isNotEmpty(process)) {
+                    inputList.add(new String[]{regId, process});
+                }
+            }
+
+            System.out.println("Total records read from csv file: " + inputList.size());
+        }
+
+        if (inputList.isEmpty()) {
+            System.out.println("No records found. Exiting.");
+            return;
+        }
+
+        // -------- CREATE BATCHES --------
+        List<List<String[]>> batches = new ArrayList<>();
+        for (int i = 0; i < inputList.size(); i += batchSize) {
+            batches.add(inputList.subList(i, Math.min(i + batchSize, inputList.size())));
+        }
+
+        // -------- OUTPUT FILES --------
+        Path outputDir = Paths.get("D:/output"); // Use D:\output
+        Files.createDirectories(outputDir);      // Ensure the folder exists
+
+        Path reprocessablePath = outputDir.resolve("output-reprocessable.csv");
+        Path unprocessablePath = outputDir.resolve("output-unprocessable.csv");
+
+        System.out.println("Reprocessable CSV: " + reprocessablePath.toAbsolutePath());
+        System.out.println("Unprocessable CSV: " + unprocessablePath.toAbsolutePath());
+
+// -------- WRITE OUTPUT FILES --------
+        try (
+                Writer writer1 = Files.newBufferedWriter(reprocessablePath);
+                CSVWriter reprocessWriter = new CSVWriter(writer1);
+
+                Writer writer2 = Files.newBufferedWriter(unprocessablePath);
+                CSVWriter unprocessWriter = new CSVWriter(writer2)
+        ) {
+            String[] header;
+
+            if (allField) {
+                header = new String[]{"reg_id", "process", "date_of_birth",
+                        "packet_created_date", "age", "remark"};
+            } else {
+                header = new String[]{"reg_id"};
+            }
+            reprocessWriter.writeNext(header);
+            unprocessWriter.writeNext(header);
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String[]> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size());
+
+                List<CompletableFuture<ApplicationProcessingDTO>> futures = batch.stream()
+                        .map(record ->
+                                CompletableFuture.supplyAsync(() -> getApplicantAge(record[0], record[1]))
+                                        .exceptionally(ex -> {
+                                            System.err.println("Error processing reg_id: " + record[0] + " - " + ex.getMessage());
+                                            return null;
+                                        })
+                        ).collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Collect rows for this batch
+                    List<String[]> reprocessableRows = new ArrayList<>();
+                    List<String[]> unprocessableRows = new ArrayList<>();
+
+                    for (CompletableFuture<ApplicationProcessingDTO> future : futures) {
+                        ApplicationProcessingDTO result = future.get();
+                        if (result == null) continue;
+
+                        String[] row;
+
+                        if (allField) {
+                            row = new String[]{
+                                    result.getRegId(),
+                                    result.getProcess(),
+                                    result.getDateOfBirth() != null ? result.getDateOfBirth().toString() : "",
+                                    result.getPacketCreatedDate() != null ? result.getPacketCreatedDate().toString() : "",
+                                    result.getApplicantAge(),
+                                    result.getRemark()
+                            };
+                        } else {
+                            row = new String[]{
+                                    result.getRegId()
+                            };
+                        }
+                        if ("REPROCESSABLE".equalsIgnoreCase(result.getRemark())) {
+                            reprocessableRows.add(row);
+                        } else {
+                            unprocessableRows.add(row);
+                        }
+                    }
+
+                    // Write after batch is complete
+                    for (String[] row : reprocessableRows) reprocessWriter.writeNext(row);
+                    for (String[] row : unprocessableRows) unprocessWriter.writeNext(row);
+
+                    reprocessWriter.flush();
+                    unprocessWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1));
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error in batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                Thread.sleep(1000); // optional delay between batches
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("Processing completed successfully");
+
+
+    }
+
+        public List<List<String>> readMultiFieldCSV() throws IOException, CsvValidationException {
 
         List<List<String>> records = new ArrayList<>();
         Resource resource = new ClassPathResource("nin_update.csv");
@@ -609,6 +754,7 @@ public class PacketServiceImpl implements PacketService {
         System.out.println("Residence status status check completed successfully");
 
     }
+
     public RidNinStatusDTO getResidence(String rid) {
         RidNinStatusDTO ridNinStatusDTO = new RidNinStatusDTO();
         ridNinStatusDTO.setRid(rid);
@@ -669,4 +815,163 @@ public class PacketServiceImpl implements PacketService {
             return ridNinStatusDTO;
         }
     }
+
+    private ResponseWrapper<FieldsDTO> callMetaInfo(String regId, String process) {
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(metainfo);
+
+        FieldRequestDTO requestDTO = new FieldRequestDTO();
+        requestDTO.setId(regId);
+        requestDTO.setProcess(process);
+        requestDTO.setSource("MIGRATOR".equalsIgnoreCase(process) ? "DATAMIGRATOR" : source);
+        requestDTO.setBypassCache(true);
+
+        RequestWrapper<FieldRequestDTO> wrapper = new RequestWrapper<>();
+        wrapper.setRequest(requestDTO);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<RequestWrapper<FieldRequestDTO>> entity =
+                new HttpEntity<>(wrapper, headers);
+
+        ResponseEntity<ResponseWrapper<FieldsDTO>> response =
+                restTemplate.exchange(
+                        builder.build().toUri(),
+                        HttpMethod.POST,
+                        entity,
+                        new ParameterizedTypeReference<ResponseWrapper<FieldsDTO>>() {}
+                );
+
+        return response.getBody();
+    }
+    private FieldsDTO callSearchField(String regId, String process, String fieldId) {
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(searchFieldUrl);
+
+        FieldRequestDTO requestDTO = new FieldRequestDTO();
+        requestDTO.setId(regId);
+        requestDTO.setField(fieldId);
+        requestDTO.setProcess(process);
+        requestDTO.setSource("MIGRATOR".equalsIgnoreCase(process) ? "DATAMIGRATOR" : source);
+        requestDTO.setBypassCache(true);
+
+        RequestWrapper<FieldRequestDTO> wrapper = new RequestWrapper<>();
+        wrapper.setRequest(requestDTO);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<RequestWrapper<FieldRequestDTO>> entity =
+                new HttpEntity<>(wrapper, headers);
+
+        ResponseEntity<ResponseWrapper<FieldsDTO>> response =
+                restTemplate.exchange(
+                        builder.build().toUri(),
+                        HttpMethod.POST,
+                        entity,
+                        new ParameterizedTypeReference<ResponseWrapper<FieldsDTO>>() {}
+                );
+
+        return response.getBody() != null ? response.getBody().getResponse() : null;
+    }
+    private NINStatusResponseDTO callIdRepo(String nin) {
+
+        String url = idRepoUrl + nin.toLowerCase() + "@nin";
+
+        UriComponentsBuilder builder = UriComponentsBuilder
+                .fromHttpUrl(url)
+                .queryParam("type", "metadata")
+                .queryParam("idType", "handle");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> response =
+                restTemplate.exchange(
+                        builder.build().toUri(),
+                        HttpMethod.GET,
+                        entity,
+                        new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {}
+                );
+
+        return response.getBody() != null ? response.getBody().getResponse() : null;
+    }
+    public ApplicationProcessingDTO getApplicantAge(String regId, String process) {
+
+        ApplicationProcessingDTO applicationProcessingDTO = new ApplicationProcessingDTO();
+        applicationProcessingDTO.setRegId(regId);
+        applicationProcessingDTO.setProcess(process);
+
+        ObjectMapper mapper = new ObjectMapper();
+
+        try {
+
+
+            FieldsDTO metaResponse = callMetaInfo(regId, process).getResponse();
+            if (metaResponse != null) {
+                ObjectNode identity = mapper.valueToTree(metaResponse.getFields());
+                if (identity.get("creationDate") != null) {
+                    applicationProcessingDTO.setPacketCreatedDate(identity.get("creationDate").asText());
+                }
+            }
+
+
+            if ("NEW".equalsIgnoreCase(process)) {
+                FieldsDTO searchResponse =
+                        callSearchField(regId, process, "dateOfBirth");
+
+                if (searchResponse != null) {
+                    ObjectNode identity = mapper.valueToTree(searchResponse.getFields());
+                    if (identity.get("dateOfBirth") != null) {
+                        applicationProcessingDTO.setDateOfBirth(identity.get("dateOfBirth").asText());
+                    }
+                }
+            }
+
+
+            else {
+
+                FieldsDTO ninResponse = callSearchField(regId, process, "NIN");
+
+                if (ninResponse != null) {
+                    ObjectNode identity = mapper.valueToTree(ninResponse.getFields());
+                    if (identity.get("NIN") != null) {
+
+                        String nin = identity.get("NIN").asText();
+                        NINStatusResponseDTO idRepoResponse = callIdRepo(nin);
+
+                        if (idRepoResponse != null) {
+                            ObjectNode idRepoIdentity =
+                                    mapper.valueToTree(idRepoResponse.getIdentity());
+
+                            if (idRepoIdentity.get("dateOfBirth") != null) {
+                                applicationProcessingDTO.setDateOfBirth(
+                                        idRepoIdentity.get("dateOfBirth").asText());
+                            }
+                        }
+                    }
+                }
+            }
+            DateTimeFormatter dobFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+            LocalDate dob = LocalDate.parse(applicationProcessingDTO.getDateOfBirth(), dobFormatter);
+            OffsetDateTime odt = OffsetDateTime.parse(applicationProcessingDTO.getPacketCreatedDate());
+            LocalDate packetDate = odt.toLocalDate();
+            int age = Period.between(dob, packetDate).getYears();
+            applicationProcessingDTO.setApplicantAge(String.valueOf(age));
+            if (age<2 || age >70){
+                applicationProcessingDTO.setRemark("REPROCESSABLE");
+            }
+            else
+                applicationProcessingDTO.setRemark("UNPROCESSABLE");
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error while fetching applicant data", e);
+        }
+
+        return applicationProcessingDTO;
+    }
 }
+
