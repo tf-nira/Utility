@@ -78,4 +78,15 @@ public class PacketController {
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
     }
+    @GetMapping("/getPrn")
+    public ResponseEntity<String> getPrn() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getPrn();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
 }
