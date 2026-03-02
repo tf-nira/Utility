@@ -1,7 +1,9 @@
 package io.mosip.packet_utility.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
@@ -972,6 +974,166 @@ public class PacketServiceImpl implements PacketService {
         }
 
         return applicationProcessingDTO;
+    }
+
+    @Override
+    public void getPrn() throws Exception {
+        int batchSize = 25;
+        String fileName = "PrnApplication.csv";
+
+        List<String[]> inputList = new ArrayList<>();
+
+// -------- READ INPUT CSV --------
+        Resource resource = new ClassPathResource(fileName);
+
+        try (Reader fileReader = new InputStreamReader(resource.getInputStream());
+             CSVReader reader = new CSVReader(fileReader)) {
+
+            String[] line;
+            while ((line = reader.readNext()) != null) {
+                if (line.length < 2) continue;
+
+                String regId = line[0].trim();
+                String process = line[1].trim();
+
+                if (StringUtils.isNotEmpty(regId) && StringUtils.isNotEmpty(process)) {
+                    inputList.add(new String[]{regId, process});
+                }
+            }
+
+            System.out.println("Total records read from csv file: " + inputList.size());
+        }
+
+        if (inputList.isEmpty()) {
+            System.out.println("No records found. Exiting.");
+            return;
+        }
+
+// -------- CREATE BATCHES --------
+        List<List<String[]>> batches = new ArrayList<>();
+        for (int i = 0; i < inputList.size(); i += batchSize) {
+            batches.add(inputList.subList(i, Math.min(i + batchSize, inputList.size())));
+        }
+
+// -------- OUTPUT FILE --------
+        Path outputDir = Paths.get("D:/output");
+        Files.createDirectories(outputDir);
+
+        Path outputPath = outputDir.resolve("output-ApplicationPrn.csv");
+
+        System.out.println("Output CSV: " + outputPath.toAbsolutePath());
+
+// -------- WRITE OUTPUT FILE --------
+        try (
+                Writer writer = Files.newBufferedWriter(outputPath);
+                CSVWriter csvWriter = new CSVWriter(writer)
+        ) {
+
+            // Header (all fields required)
+            String[] header = new String[]{
+                    "reg_id",
+                    "process",
+                    "prn",
+                    "operator"
+            };
+            csvWriter.writeNext(header);
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String[]> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size());
+
+                List<CompletableFuture<PrnApplication>> futures = batch.stream()
+                        .map(record ->
+                                CompletableFuture.supplyAsync(() ->
+                                        {
+                                            try {
+                                                return getApplicantPrn(record[0], record[1]);
+                                            } catch (JsonProcessingException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        }
+                                ).exceptionally(ex -> {
+                                    System.err.println("Error processing reg_id: "
+                                            + record[0] + " - " + ex.getMessage());
+                                    return null;
+                                })
+                        ).collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf =
+                        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait max 2 minutes per batch
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    for (CompletableFuture<PrnApplication> future : futures) {
+                        PrnApplication result = future.get();
+                        if (result == null) continue;
+
+                        String[] row = new String[]{
+                                result.getRegId(),
+                                result.getProcess(),
+                                result.getPrn(),
+                                result.getOperator()
+                        };
+
+                        csvWriter.writeNext(row);
+                    }
+
+                    csvWriter.flush();
+                    System.out.println("Completed batch " + (i + 1));
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error in batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                Thread.sleep(1000); // optional delay between batches
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("Processing completed successfully");
+    }
+    public PrnApplication getApplicantPrn(String regId,String process) throws JsonProcessingException {
+        PrnApplication prnApplication = new PrnApplication();
+        prnApplication.setRegId(regId);
+        prnApplication.setProcess(process);
+        ObjectMapper mapper = new ObjectMapper();
+        FieldsDTO searchResponse =
+                callSearchField(regId, process, "PRNId");
+        if (searchResponse != null) {
+            ObjectNode identity = mapper.valueToTree(searchResponse.getFields());
+            if (identity.get("PRNId") != null) {
+                prnApplication.setPrn(identity.get("PRNId").asText());
+            }
+        }
+
+        FieldsDTO metaResponse = callMetaInfo(regId, process).getResponse();
+        if (metaResponse != null) {
+            ObjectNode identity = mapper.valueToTree(metaResponse.getFields());
+            if (identity.get("operationsData") != null) {
+                String operationsDataStr = identity.get("operationsData").asText();
+
+                // Parse the string into JSON array
+                ArrayNode operationsArray = (ArrayNode) mapper.readTree(operationsDataStr);
+
+                // Find the officerId value
+                for (JsonNode node : operationsArray) {
+                    if ("officerId".equals(node.get("label").asText())) {
+                        prnApplication.setOperator(node.get("value").asText());
+                        break;
+                    }
+                }
+            }
+        }
+
+
+    return prnApplication;
     }
 }
 

@@ -10,4 +10,5 @@ public interface PacketService {
     public void updateIdentity () throws  Exception;
     public void getResidenceStatus() throws  Exception;
     public void getAge() throws  Exception;
+    public void getPrn() throws  Exception;
 }
