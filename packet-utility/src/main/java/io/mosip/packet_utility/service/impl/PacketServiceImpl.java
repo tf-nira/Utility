@@ -680,9 +680,24 @@ public class PacketServiceImpl implements PacketService {
 
             ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
 
-            if (responseWrapper.getResponse() != null) {
-                ninStatusDTO.setStatus("EXIST_IN_IDREPO");
+            if (responseWrapper.getResponse() == null) {
+                ninStatusDTO.setStatus("NOT_EXIST_IN_IDREPO");
             }
+
+            if (responseWrapper != null &&
+                    responseWrapper.getResponse() != null &&
+                    responseWrapper.getResponse().getIdentity() != null &&
+                    responseWrapper.getResponse().getIdentity().getSignature() != null &&
+                    !responseWrapper.getResponse().getIdentity().getSignature().isEmpty()) {
+
+                ninStatusDTO.setStatus("SIGNATURE_PRESENT");
+
+            } else {
+
+                ninStatusDTO.setStatus("SIGNATURE_NOT_PRESENT");
+
+            }
+
 
             if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
                 System.out.println("NIN not found in ID repo: " + nin);

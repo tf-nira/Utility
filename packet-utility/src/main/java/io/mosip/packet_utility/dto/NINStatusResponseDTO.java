@@ -7,7 +7,7 @@ import java.util.List;
 @Data
 public class NINStatusResponseDTO {
     private String entity;
-    private Object identity;
+    private IdentityDTO identity;
     private List<Documents> documents;
     private String status;
     private List<Object> cardDetails;
