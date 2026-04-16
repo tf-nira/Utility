@@ -38,7 +38,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -69,9 +71,15 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.mosip.id.repo.update.identity.url}")
     private String updateIdentityUrl;
+    
+    @Value("${io.mosip.packet.manager.document.url}")
+    private String documentUrl;
 
     @Value("${io.mosip.output.file.path}")
     private String filepath;
+    
+    @Value("${io.mosip.packet.manager.info.url}")
+    private String infoUrl;
 
     private Boolean allField =false;
 
@@ -493,51 +501,69 @@ public class PacketServiceImpl implements PacketService {
 
     public UpdateRequestDTO createUpdateRequest(List<String> updateDetailsInfo) {
         Identity identity = new Identity();
+        RequestData requestData = new RequestData();
+        ObjectMapper mapper = new ObjectMapper();
+        String regId = updateDetailsInfo.get(0);
+        
         identity.setIDSchemaVersion(8.7);
-        identity.setNIN(updateDetailsInfo.get(0));
+//        identity.setIDSchemaVersion(9.4);
+        identity.setNIN(updateDetailsInfo.get(1));
 
-        if (isNotBlank(updateDetailsInfo.get(1))) {
+        if (isNotBlank(updateDetailsInfo.get(2))) {
             LocalizedValue surnameValue = new LocalizedValue();
             surnameValue.setLanguage("eng");
-            surnameValue.setValue(updateDetailsInfo.get(1));
+            surnameValue.setValue(updateDetailsInfo.get(2));
             identity.setSurname(Collections.singletonList(surnameValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(2))) {
+        if (isNotBlank(updateDetailsInfo.get(3))) {
             LocalizedValue givenNameValue = new LocalizedValue();
             givenNameValue.setLanguage("eng");
-            givenNameValue.setValue(updateDetailsInfo.get(2));
+            givenNameValue.setValue(updateDetailsInfo.get(3));
             identity.setGivenName(Collections.singletonList(givenNameValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(3))) {
+        if (isNotBlank(updateDetailsInfo.get(4))) {
             LocalizedValue otherNamesValue = new LocalizedValue();
             otherNamesValue.setLanguage("eng");
-            otherNamesValue.setValue(updateDetailsInfo.get(3));
+            otherNamesValue.setValue(updateDetailsInfo.get(4));
             identity.setOtherNames(Collections.singletonList(otherNamesValue));
         }
 
 
-        if (isNotBlank(updateDetailsInfo.get(4))) {
+        if (isNotBlank(updateDetailsInfo.get(5))) {
             LocalizedValue genderValue = new LocalizedValue();
             genderValue.setLanguage("eng");
-            genderValue.setValue(updateDetailsInfo.get(4));
+            genderValue.setValue(updateDetailsInfo.get(5));
             identity.setGender(Collections.singletonList(genderValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(5))) {
-            identity.setDateOfBirth(updateDetailsInfo.get(5));
-        }
         if (isNotBlank(updateDetailsInfo.get(6))) {
+            identity.setDateOfBirth(updateDetailsInfo.get(6));
+        }
+        if (isNotBlank(updateDetailsInfo.get(7))) {
             LocalizedValue residenceStatusValue = new LocalizedValue();
             residenceStatusValue.setLanguage("eng");
-            residenceStatusValue.setValue(updateDetailsInfo.get(6));
+            residenceStatusValue.setValue(updateDetailsInfo.get(7));
             identity.setResidenceStatus(Collections.singletonList(residenceStatusValue));
         }
+        
+        Object finalIdentity = identity;
+        if (updateDetailsInfo.size() > 8 && isNotBlank(updateDetailsInfo.get(8)) && "Yes".equalsIgnoreCase(updateDetailsInfo.get(8))) {
+            DocumentResultDto docResult = getAllDocumentsList(regId);
 
-        RequestData requestData = new RequestData();
+            if (docResult.getIdentityDocuments() != null && !docResult.getIdentityDocuments().isEmpty()) {
+            	Map<String, Object> identityMap = mapper.convertValue(identity, Map.class);
+                identityMap.putAll(docResult.getIdentityDocuments());
+                finalIdentity = identityMap;
+            }
+            if (docResult.getDocuments() != null && !docResult.getDocuments().isEmpty()) {
+                requestData.setDocuments(docResult.getDocuments());
+            }
+
+        }
         requestData.setRegistrationId(generateRandom10DigitString());
-        requestData.setIdentity(identity);
+        requestData.setIdentity(finalIdentity);
 
         UpdateRequestDTO updateRequestDto = new UpdateRequestDTO();
         updateRequestDto.setId("mosip.id.update");
@@ -547,7 +573,124 @@ public class PacketServiceImpl implements PacketService {
 
         return updateRequestDto;
     }
+    
+    public DocumentResultDto getAllDocumentsList(String registrationId) {
+        ResponseEntity<Map> infoResponse = callInfoApi(registrationId);
+        String process = null;
+        List<String> documentList = new ArrayList<>();
+        
+        if (infoResponse.getBody() != null) {
+            Map<String, Object> responseData = (Map<String, Object>) infoResponse.getBody().get("response");
+            List<Map<String, Object>> infoList = (List<Map<String, Object>>) responseData.get("info");
+            if (infoList != null && !infoList.isEmpty()) {
+                Map<String, Object> info = infoList.get(0);
+                process = (String) info.get("process");
+                if(process.equalsIgnoreCase("MVS_DOC")){
+                	info = infoList.get(1);
+                	process = (String) info.get("process");
+                }
+                List<String> demographics = (List<String>) info.get("demographics");
+                if (demographics != null) {
+                    documentList = demographics.stream()
+                            .filter(field -> field.startsWith("proofOf") || field.equalsIgnoreCase("individualBiometrics"))
+                            .collect(Collectors.toList());
+                }
+                
+            }
+        }
+        if (!documentList.contains("individualBiometrics")) {
+            documentList.add("individualBiometrics");
+        }
+        
+        Map<String, Object> identityDocs = new HashMap<>();
+        List<DocumentDto> documentDTOList = new ArrayList<>();
+        for (String docId : documentList) {
+            try {
+                ResponseEntity<Map> response = callDocumentApi(registrationId, docId, process);
+                if (response.getBody() != null) {
+                    Map<String, Object> responseData =
+                            (Map<String, Object>) response.getBody().get("response");
+                    if (responseData != null && responseData.get("document") != null) {
+                        String base64Value = (String) responseData.get("document");
+                        base64Value = base64Value.replace('/', '_').replace('+', '-');
+                        DocumentDetailDto identityDoc = new DocumentDetailDto();
+                        identityDoc.setFormat((String) responseData.get("format"));
+                        identityDoc.setType((String) responseData.get("type"));
+                        identityDoc.setValue((String) responseData.get("value"));
+                        identityDoc.setRefNumber(null);
+                        identityDocs.put(docId, identityDoc);
+                        
+                        DocumentDto dto = new DocumentDto();
+                        dto.setCategory(docId);
+                        dto.setValue(base64Value);
+                        documentDTOList.add(dto);
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        
+        return new DocumentResultDto(identityDocs, documentDTOList);
+    }
+    
+    private ResponseEntity<Map> callDocumentApi(String registrationId,  String docId, String process) {
 
+        try {
+            Map<String, Object> request = new HashMap<>();
+            request.put("id", registrationId);
+            request.put("documentName", docId);
+            request.put("source", source);
+            request.put("process", process);
+            request.put("bypassCache", true);
+
+            RequestWrapper<Map<String, Object>> wrapper = new RequestWrapper<>();
+            wrapper.setId("string");
+            wrapper.setVersion("1.0");
+            wrapper.setRequesttime(LocalDateTime.now());
+            wrapper.setRequest(request);
+            wrapper.setMetadata(new HashMap<>());
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<RequestWrapper<Map<String, Object>>> entity =
+                    new HttpEntity<>(wrapper, headers);
+
+            return restTemplate.exchange(documentUrl, HttpMethod.POST, entity, new ParameterizedTypeReference<Map>() {});
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+    
+    private ResponseEntity<Map> callInfoApi(String registrationId) {
+
+        try {
+            Map<String, Object> request = new HashMap<>();
+            request.put("id", registrationId);
+
+            RequestWrapper<Map<String, Object>> wrapper = new RequestWrapper<>();
+            wrapper.setId("string");
+            wrapper.setVersion("1.0");
+            wrapper.setRequesttime(LocalDateTime.now());
+            wrapper.setRequest(request);
+            wrapper.setMetadata(new HashMap<>());
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<RequestWrapper<Map<String, Object>>> entity =
+                    new HttpEntity<>(wrapper, headers);
+
+            return restTemplate.exchange(infoUrl, HttpMethod.POST,
+                    entity, new ParameterizedTypeReference<Map>() {});
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+    
     private boolean isNotBlank(String value) {
         return value != null && !value.trim().isEmpty();
     }
@@ -655,7 +798,7 @@ public class PacketServiceImpl implements PacketService {
 
     public NinStatusDTO updateDetails(List<String> updateDetailsInfo) {
         NinStatusDTO ninStatusDTO = new NinStatusDTO();
-        ninStatusDTO.setNin(updateDetailsInfo.get(0));
+        ninStatusDTO.setNin(updateDetailsInfo.get(1));
 
         String url = updateIdentityUrl;
         UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
@@ -676,9 +819,12 @@ public class PacketServiceImpl implements PacketService {
 
             if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
                 System.out.println("NIN not updated in ID repo: " + updateDetailsInfo.get(0));
+                System.out.println("Error: " + responseWrapper.getErrors());
                 ninStatusDTO.setStatus(responseWrapper.getErrors().get(0).getMessage());
                 return ninStatusDTO;
             }
+            UpdateResponseDTO updateResponse = responseWrapper.getResponse();
+            System.out.println("NIN - Status: " + ninStatusDTO.getNin() + " - " + updateResponse.getStatus());
 
             ninStatusDTO.setStatus(responseWrapper.getResponse().getStatus());
             return ninStatusDTO;
@@ -1135,5 +1281,15 @@ public class PacketServiceImpl implements PacketService {
 
     return prnApplication;
     }
+
+	@Override
+	public Map<String, String> getDocumentMapping() {
+		return null;
+	}
+
+	@Override
+	public Map<String, Object> getIdentityMapping() {
+		return null;
+	}
 }
 

@@ -1,5 +1,7 @@
 package io.mosip.packet_utility.service;
 
+import java.util.Map;
+
 import org.springframework.stereotype.Service;
 
 @Service
@@ -11,4 +13,6 @@ public interface PacketService {
     public void getResidenceStatus() throws  Exception;
     public void getAge() throws  Exception;
     public void getPrn() throws  Exception;
+    Map<String, String> getDocumentMapping();
+    Map<String, Object> getIdentityMapping();
 }
