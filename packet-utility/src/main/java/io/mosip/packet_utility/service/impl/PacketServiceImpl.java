@@ -9,18 +9,29 @@ import com.opencsv.CSVReaderBuilder;
 import com.opencsv.CSVWriter;
 import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.opencsv.exceptions.CsvValidationException;
+import io.mosip.biometrics.util.ConvertRequestDto;
+import io.mosip.biometrics.util.face.FaceEncoder;
+import io.mosip.image.compressor.sdk.impl.ImageCompressorSDKV2;
+import io.mosip.kernel.biometrics.constant.BiometricType;
+import io.mosip.kernel.biometrics.constant.ProcessedLevelType;
+import io.mosip.kernel.biometrics.entities.*;
+import io.mosip.kernel.biometrics.model.Response;
 import io.mosip.kernel.core.util.DateUtils;
 import io.mosip.packet_utility.dto.*;
 import io.mosip.packet_utility.service.CbeffUtil;
 import io.mosip.packet_utility.service.PacketService;
-import io.mosip.kernel.biometrics.entities.BIR;
-import io.mosip.kernel.biometrics.entities.BiometricRecord;
+
+import javax.imageio.ImageIO;
+import org.w3c.dom.*;
+
+import java.awt.image.BufferedImage;
+import java.io.*;
+
+import java.util.*;
 
 import io.mosip.kernel.core.util.JsonUtils;
 import io.mosip.kernel.core.util.StringUtils;
 
-import org.apache.commons.codec.binary.Base64;
-import org.apache.commons.collections.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,23 +44,12 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -92,6 +92,9 @@ public class PacketServiceImpl implements PacketService {
     
 	@Autowired
 	private CbeffUtil cbeffutil;
+
+    @Autowired
+    private ImageCompressorSDKV2 imageCompressorSDK;
 
     @Override
     public void getPacketNIN() throws Exception {
@@ -223,70 +226,64 @@ public class PacketServiceImpl implements PacketService {
         System.out.println("center and operational data extraction completed successfully");
     }
 
-    @Override
-    public void getNINStatus() throws Exception {
-        List<String> ninList = readNINsFromCSV(false);
+@Override
+public void getNINStatus() throws Exception {
+    List<String> ninList = readNINsFromCSV(false);
 
-        int batchSize = 25;
-        List<List<String>> batches = createBatches(ninList, batchSize);
+    int batchSize = 25;
+    List<List<String>> batches = createBatches(ninList, batchSize);
 
-        Path outputPath = Paths.get(filepath, "nin_status_report.csv");
+    Path outputPath = Paths.get(filepath, "nin_status_report.csv");
 
-        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+    try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
 
-            // Write header
-            csvWriter.writeNext(new String[] { "NIN", "STATUS" });
-            csvWriter.flush();
+        csvWriter.writeNext(new String[] { "NIN", "STATUS" });
+        csvWriter.flush();
 
-            System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
+        System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
 
-            for (int i = 0; i < batches.size(); i++) {
-                List<String> batch = batches.get(i);
-                System.out.println(
-                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " NIMs");
+        for (int i = 0; i < batches.size(); i++) {
+            List<String> batch = batches.get(i);
+            System.out.println("Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " NIMs");
 
-                // Processing batch in parallel
-                List<CompletableFuture<NinStatusDTO>> futures = batch.stream().map(nin -> CompletableFuture
-                        .supplyAsync(() -> checkNINExistsAsync(nin), executor).handle((ninStatusDTO, throwable) -> {
-                            if (throwable != null) {
-                                System.err.println("Error checking NIN " + nin + ": " + throwable.getMessage());
-                            }
-                            return ninStatusDTO;
-                        })).collect(Collectors.toList());
+            List<CompletableFuture<NinStatusDTO>> futures = batch.stream().map(nin -> CompletableFuture
+                    .supplyAsync(() -> checkNINExistsAsync(nin, filepath), executor) // ✅ pass filepath
+                    .handle((ninStatusDTO, throwable) -> {
+                        if (throwable != null) {
+                            System.err.println("Error checking NIN " + nin + ": " + throwable.getMessage());
+                        }
+                        return ninStatusDTO;
+                    })).collect(Collectors.toList());
 
-                // Waiting for all futures in the batch to complete
-                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+            CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
 
-                try {
-                    // Wait for batch completion with timeout
-                    allOf.get(2, TimeUnit.MINUTES);
+            try {
+                allOf.get(2, TimeUnit.MINUTES);
 
-                    // Write results for this batch
-                    for (CompletableFuture<NinStatusDTO> future : futures) {
-                        NinStatusDTO result = future.get();
-                        csvWriter.writeNext(new String[] { result.getNin(), result.getStatus() });
-                    }
-                    csvWriter.flush();
-
-                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
-
-                } catch (TimeoutException e) {
-                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
-                } catch (ExecutionException | InterruptedException e) {
-                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                for (CompletableFuture<NinStatusDTO> future : futures) {
+                    NinStatusDTO result = future.get();
+                    csvWriter.writeNext(new String[] { result.getNin(), result.getStatus() });
                 }
+                csvWriter.flush();
 
-                // Small delay between batches
-                Thread.sleep(1000);
+                System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+            } catch (TimeoutException e) {
+                System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+            } catch (ExecutionException | InterruptedException e) {
+                System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
             }
 
-        } catch (Exception e) {
-            System.err.println("Error occurred: " + e.getMessage());
-            throw e;
+            Thread.sleep(1000);
         }
 
-        System.out.println("NIN status check completed successfully");
+    } catch (Exception e) {
+        System.err.println("Error occurred: " + e.getMessage());
+        throw e;
     }
+
+    System.out.println("NIN status check completed successfully");
+}
 
     @Override
     public void updateIdentity() throws  Exception {
@@ -659,43 +656,201 @@ public class PacketServiceImpl implements PacketService {
         }
     }
 
-    public NinStatusDTO checkNINExistsAsync(String nin) {
-        NinStatusDTO ninStatusDTO = new NinStatusDTO();
-        ninStatusDTO.setNin(nin);
 
-        String handle = nin.toLowerCase() + "@nin";
-        String url = idRepoUrl + handle;
+public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
 
-        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "all")
-                .queryParam("idType", "handle");
+    NinStatusDTO ninStatusDTO = new NinStatusDTO();
+    ninStatusDTO.setNin(nin);
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+    String handle = nin.toLowerCase() + "@nin";
+    String url = idRepoUrl + handle;
 
-        try {
-            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
-                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
-                    });
+    UriComponentsBuilder builder =
+            UriComponentsBuilder.fromHttpUrl(url)
+                    .queryParam("type", "all")
+                    .queryParam("idType", "handle");
 
-            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+    HttpHeaders headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    HttpEntity<String> entity = new HttpEntity<>(null, headers);
 
-            if (responseWrapper.getResponse() != null) {
-                ninStatusDTO.setStatus("EXIST_IN_IDREPO");
+    try {
+        Path ninFolder = Paths.get(baseOutputPath, nin);
+        Files.createDirectories(ninFolder);
+
+        ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity =
+                restTemplate.exchange(
+                        builder.build().toUri(),
+                        HttpMethod.GET,
+                        entity,
+                        new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {});
+
+        ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+
+        String data = null;
+
+        if (responseWrapper != null && responseWrapper.getResponse() != null) {
+            List<Documents> docs = responseWrapper.getResponse().getDocuments();
+            for (Documents doc : docs) {
+                if ("individualBiometrics".equalsIgnoreCase(doc.getCategory())) {
+                    data = doc.getValue();
+                    break;
+                }
             }
-
-            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
-                System.out.println("NIN not found in ID repo: " + nin);
-                ninStatusDTO.setStatus("NOT_FOUND");
-            }
-
-            return ninStatusDTO;
-
-        } catch (RestClientException e) {
-            System.err.println("Exception for NIN " + nin + ": " + e.getMessage());
-            ninStatusDTO.setStatus(e.getMessage());
-            return ninStatusDTO;
         }
+
+        if (data != null) {
+
+            byte[] decodedBytes = Base64.getUrlDecoder().decode(data);
+
+            Map<String, String> faceMap = cbeffutil.getBDBBasedOnType(decodedBytes, "Face", null);
+
+            if (faceMap != null && !faceMap.isEmpty()) {
+
+                String faceBdbBase64 = faceMap.values().iterator().next();
+                byte[] faceBdb = Base64.getDecoder().decode(faceBdbBase64);
+
+
+                byte[] jp2Bytes = extractImageFromIso19794(faceBdb);
+                if (jp2Bytes != null) {
+                    BufferedImage rawImage = ImageIO.read(new ByteArrayInputStream(jp2Bytes));
+                    if (rawImage != null) {
+                        File rawFile = ninFolder.resolve("raw_face.jpg").toFile();
+                        ImageIO.write(rawImage, "JPEG", rawFile);
+                        System.out.println(" [" + nin + "] raw_face.jpg written");
+                    }
+                }
+
+                // Re-encode into fresh ISO container for SDK
+                ConvertRequestDto requestDto = new ConvertRequestDto();
+                requestDto.setModality("Face");
+                requestDto.setPurpose("REGISTRATION");
+                requestDto.setVersion("ISO19794_5_2011");
+                requestDto.setImageType(0);
+                requestDto.setInputBytes(jp2Bytes);
+                byte[] reEncodedIso = FaceEncoder.convertFaceImageToISO(requestDto);
+
+                RegistryIDType format = new RegistryIDType();
+                format.setOrganization("MOSIP");
+                format.setType("8");
+
+                BDBInfo bdbInfo = new BDBInfo();
+                bdbInfo.setType(Collections.singletonList(BiometricType.FACE));
+                bdbInfo.setSubtype(new ArrayList<>());
+                bdbInfo.setLevel(ProcessedLevelType.RAW);
+                bdbInfo.setFormat(format);
+
+                BIR bir = new BIR.BIRBuilder()
+                        .withBdb(reEncodedIso)
+                        .withBdbInfo(bdbInfo)
+                        .build();
+
+                BiometricRecord biometricRecord = new BiometricRecord();
+                biometricRecord.setSegments(Collections.singletonList(bir));
+
+                Response<BiometricRecord> response =
+                        imageCompressorSDK.extractTemplate(
+                                biometricRecord,
+                                Arrays.asList(BiometricType.FACE),
+                                new HashMap<>());
+
+                if (response != null && response.getStatusCode() == 200) {
+
+                    byte[] compressedBdb = response.getResponse().getSegments().get(0).getBdb();
+
+                    System.out.println("[" + nin + "] Oriiginal  : " + reEncodedIso.length + " bytes");
+                    System.out.println("[" + nin + "] Compresed: " + compressedBdb.length + " bytes");
+                    System.out.println("[" + nin + "] Reduction : "
+                            + (100 - (compressedBdb.length * 100 / reEncodedIso.length)) + "%");
+
+
+                    byte[] compressedJp2 = extractImageFromIso19794(compressedBdb);
+                    if (compressedJp2 != null) {
+                        BufferedImage compressedImage = ImageIO.read(new ByteArrayInputStream(compressedJp2));
+                        if (compressedImage != null) {
+                            File compressedFile = ninFolder.resolve("compressed_face.jpg").toFile();
+                            ImageIO.write(compressedImage, "JPEG", compressedFile);
+                            System.out.println(" [" + nin + "] compressed_face.jpg written");
+                        } else {
+                            Files.write(ninFolder.resolve("compressed_face.jp2"), compressedJp2);
+                            System.out.println(" [" + nin + "] compressed_face.jp2 written (fallback)");
+                        }
+                    } else {
+                        BufferedImage compressedImage = ImageIO.read(new ByteArrayInputStream(compressedBdb));
+                        if (compressedImage != null) {
+                            File compressedFile = ninFolder.resolve("compressed_face.jpg").toFile();
+                            ImageIO.write(compressedImage, "JPEG", compressedFile);
+                            System.out.println(" [" + nin + "] compressed_face.jpg written (direct)");
+                        }
+                    }
+
+                } else {
+                    System.out.println("SDK error for [" + nin + "]: "
+                            + (response != null ? response.getStatusCode() : "null"));
+                }
+
+                ninStatusDTO.setStatus("FACE_FOUND");
+
+            } else {
+                System.out.println(" Face NOT found for: " + nin);
+                ninStatusDTO.setStatus("FACE_NOT_FOUND");
+            }
+
+        } else {
+            ninStatusDTO.setStatus("NO_BIOMETRICS");
+        }
+
+        if (responseWrapper != null &&
+                responseWrapper.getErrors() != null &&
+                !responseWrapper.getErrors().isEmpty()) {
+            System.out.println("NIN not found: " + nin);
+            ninStatusDTO.setStatus("NOT_FOUND");
+        }
+
+    } catch (Exception e) {
+        System.err.println("Exception for NIN " + nin + ": " + e.getMessage());
+        ninStatusDTO.setStatus("ERROR");
+    }
+
+    return ninStatusDTO;
+}
+
+    private byte[] extractImageFromIso19794(byte[] faceRecord) {
+
+        for (int i = 0; i < faceRecord.length - 3; i++) {
+
+            // JPEG2000 JP2 file format signature
+            if ((faceRecord[i] & 0xFF) == 0x00
+                    && (faceRecord[i + 1] & 0xFF) == 0x00
+                    && (faceRecord[i + 2] & 0xFF) == 0x00
+                    && (faceRecord[i + 3] & 0xFF) == 0x0C) {
+                // verify next 4 bytes are "jP  " (6A 50 20 20)
+                if (i + 7 < faceRecord.length
+                        && (faceRecord[i + 4] & 0xFF) == 0x6A
+                        && (faceRecord[i + 5] & 0xFF) == 0x50
+                        && (faceRecord[i + 6] & 0xFF) == 0x20
+                        && (faceRecord[i + 7] & 0xFF) == 0x20) {
+                    byte[] jp2 = new byte[faceRecord.length - i];
+                    System.arraycopy(faceRecord, i, jp2, 0, jp2.length);
+                    System.out.println(" JPEG2000 (JP2) found at offset: " + i);
+                    return jp2;
+                }
+            }
+
+            // JPEG2000 codestream signature (no JP2 container)
+            if ((faceRecord[i] & 0xFF) == 0xFF
+                    && (faceRecord[i + 1] & 0xFF) == 0x4F
+                    && (faceRecord[i + 2] & 0xFF) == 0xFF
+                    && (faceRecord[i + 3] & 0xFF) == 0x51) {
+                byte[] j2k = new byte[faceRecord.length - i];
+                System.arraycopy(faceRecord, i, j2k, 0, j2k.length);
+                System.out.println(" JPEG2000 (J2K codestream) found at offset: " + i);
+                return j2k;
+            }
+        }
+
+        System.out.println(" No image found in ISO 19794-5 record");
+        return null;
     }
 
     public NinStatusDTO updateDetails(List<String> updateDetailsInfo) {
@@ -764,7 +919,7 @@ public class PacketServiceImpl implements PacketService {
 
 	            }
             if(data!=null) {
-            	Map<String, String> bdbBasedOnFinger = cbeffutil.getBDBBasedOnType(Base64.decodeBase64(data), "Face",
+            	Map<String, String> bdbBasedOnFinger = cbeffutil.getBDBBasedOnType(Base64.getDecoder().decode(data), "Face",
         				null);
             	 bdbdata = bdbBasedOnFinger.values().iterator().next();
             
@@ -816,7 +971,7 @@ public class PacketServiceImpl implements PacketService {
 	            for (BIR bir : biometricRecord.getSegments()) {
 	                if(bir.getBdbInfo().getType() != null) {
 	       				if(bir.getBdb()!=null) {
-	       					bdbData=Base64.encodeBase64String(bir.getBdb());
+                            bdbData = Base64.getEncoder().encodeToString(bir.getBdb());
 	       				}
 	                }
 	       		}
