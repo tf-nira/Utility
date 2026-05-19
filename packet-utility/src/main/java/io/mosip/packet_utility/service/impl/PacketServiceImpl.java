@@ -27,6 +27,7 @@ import org.w3c.dom.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import io.mosip.kernel.core.util.JsonUtils;
@@ -690,6 +691,12 @@ public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
         String data = null;
 
         if (responseWrapper != null && responseWrapper.getResponse() != null) {
+
+            Object identity = responseWrapper.getResponse().getIdentity();
+            if (identity != null) {
+                writeDemographicInfo(ninFolder, identity, nin);
+            }
+
             List<Documents> docs = responseWrapper.getResponse().getDocuments();
             for (Documents doc : docs) {
                 if ("individualBiometrics".equalsIgnoreCase(doc.getCategory())) {
@@ -851,6 +858,56 @@ public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
 
         System.out.println(" No image found in ISO 19794-5 record");
         return null;
+    }
+
+    private void writeDemographicInfo(Path ninFolder, Object identity, String nin) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String json = mapper.writeValueAsString(identity);
+            JsonNode node = mapper.readTree(json);
+            String surname    = getLanguageValue(node, "surname");
+            String givenName  = getLanguageValue(node, "givenName");
+            String otherNames = getLanguageValue(node, "otherName");
+            String dob        = getNodeValue(node, "dateOfBirth");
+            String gender     = getLanguageValue(node, "gender");
+            String content = String.join(System.lineSeparator(),
+                    "NIN           : " + nin,
+                    "Surname       : " + surname,
+                    "Given Name    : " + givenName,
+                    "Other Names   : " + otherNames,
+                    "Date of Birth : " + dob,
+                    "Gender        : " + gender
+            );
+
+            Files.write(ninFolder.resolve(nin+"_demographic_info.txt"),
+                    content.getBytes(StandardCharsets.UTF_8));
+
+            System.out.println(" [" + nin + "] demographic_info.txt written");
+
+        } catch (Exception e) {
+            System.err.println(" [" + nin + "] Failed to write demographic info: " + e.getMessage());
+        }
+    }
+    private String getLanguageValue(JsonNode node, String field) {
+        JsonNode fieldNode = node.get(field);
+        if (fieldNode != null && fieldNode.isArray() && fieldNode.size() > 0) {
+            JsonNode first = fieldNode.get(0);
+            if (first.has("value")) {
+                return first.get("value").asText("");
+            }
+        }
+        if (fieldNode != null && fieldNode.isTextual()) {
+            return fieldNode.asText("");
+        }
+        return "";
+    }
+
+    private String getNodeValue(JsonNode node, String field) {
+        JsonNode fieldNode = node.get(field);
+        if (fieldNode != null) {
+            return fieldNode.asText("");
+        }
+        return "";
     }
 
     public NinStatusDTO updateDetails(List<String> updateDetailsInfo) {
