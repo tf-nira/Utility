@@ -69,6 +69,19 @@ public class PacketController {
 
     }
 
+    @GetMapping("/updateCartdDetails")
+    public ResponseEntity<String> updateCardDetails() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.updateCardDetails();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+
+    }
+
     @GetMapping("/updateDetails")
     public ResponseEntity<String> updateDetails() throws Exception {
         CompletableFuture.runAsync(() -> {
