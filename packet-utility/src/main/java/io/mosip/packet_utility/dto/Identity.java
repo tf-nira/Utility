@@ -15,6 +15,10 @@ public class Identity {
     @Valid
     @JsonProperty("IDSchemaVersion")
     private double IDSchemaVersion;
+    
+
+    @JsonProperty("UIN")
+    private String UIN;
 
     @JsonProperty("NIN")
     private String NIN;

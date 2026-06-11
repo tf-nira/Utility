@@ -505,9 +505,16 @@ public class PacketServiceImpl implements PacketService {
         ObjectMapper mapper = new ObjectMapper();
         String regId = updateDetailsInfo.get(0);
         
+        String uin = getUin(regId);
+        
         identity.setIDSchemaVersion(8.7);
 //        identity.setIDSchemaVersion(9.4);
-        identity.setNIN(updateDetailsInfo.get(1));
+        if (isNotBlank(updateDetailsInfo.get(1))) {
+            identity.setNIN(updateDetailsInfo.get(1));
+        } else {
+        	identity.setUIN(uin);
+        	requestData.setStatus("DEACTIVATED");
+        }
 
         if (isNotBlank(updateDetailsInfo.get(2))) {
             LocalizedValue surnameValue = new LocalizedValue();
@@ -573,6 +580,37 @@ public class PacketServiceImpl implements PacketService {
 
         return updateRequestDto;
     }
+    
+    public String getUin(String rid) {
+        String handle = rid;
+        String url = idRepoUrl + handle;
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+                    });
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getResponse() != null) {
+                NINStatusResponseDTO response = responseWrapper.getResponse();
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode identityJson = mapper.valueToTree(response.getIdentity());
+                return identityJson.get("UIN").asText();
+            }
+        } catch (RestClientException e) {
+            System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            return null;
+        }
+		return null;
+    }
+
     
     public DocumentResultDto getAllDocumentsList(String registrationId) {
         ResponseEntity<Map> infoResponse = callInfoApi(registrationId);
