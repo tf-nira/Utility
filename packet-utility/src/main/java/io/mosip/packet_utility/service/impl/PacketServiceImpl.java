@@ -507,8 +507,8 @@ public class PacketServiceImpl implements PacketService {
         
         String uin = getUin(regId);
         
-        identity.setIDSchemaVersion(8.7);
-//        identity.setIDSchemaVersion(9.4);
+        identity.setIDSchemaVersion(8.8); // prod
+//        identity.setIDSchemaVersion(9.6);   // preprod
         if (isNotBlank(updateDetailsInfo.get(1))) {
             identity.setNIN(updateDetailsInfo.get(1));
         } else {
@@ -555,8 +555,15 @@ public class PacketServiceImpl implements PacketService {
             identity.setResidenceStatus(Collections.singletonList(residenceStatusValue));
         }
         
+        if (isNotBlank(updateDetailsInfo.get(8))) {
+            LocalizedValue remarkValue = new LocalizedValue();
+            remarkValue.setLanguage("eng");
+            remarkValue.setValue("Duplicate of " + updateDetailsInfo.get(8));
+            identity.setRemark(Collections.singletonList(remarkValue));
+        }
+        
         Object finalIdentity = identity;
-        if (updateDetailsInfo.size() > 8 && isNotBlank(updateDetailsInfo.get(8)) && "Yes".equalsIgnoreCase(updateDetailsInfo.get(8))) {
+        if (updateDetailsInfo.size() > 9 && isNotBlank(updateDetailsInfo.get(9)) && "Yes".equalsIgnoreCase(updateDetailsInfo.get(9))) {
             DocumentResultDto docResult = getAllDocumentsList(regId);
 
             if (docResult.getIdentityDocuments() != null && !docResult.getIdentityDocuments().isEmpty()) {
