@@ -502,20 +502,25 @@ public class PacketServiceImpl implements PacketService {
     public UpdateRequestDTO createUpdateRequest(List<String> updateDetailsInfo) {
         Identity identity = new Identity();
         RequestData requestData = new RequestData();
+        String uin = null;
         ObjectMapper mapper = new ObjectMapper();
         String regId = updateDetailsInfo.get(0);
-        
-        String uin = getUin(regId);
+        String nin = updateDetailsInfo.get(1);
         
         identity.setIDSchemaVersion(8.8); // prod
 //        identity.setIDSchemaVersion(9.6);   // preprod
         if (isNotBlank(updateDetailsInfo.get(1))) {
-            identity.setNIN(updateDetailsInfo.get(1));
-        } else {
-        	identity.setUIN(uin);
-        	requestData.setStatus("DEACTIVATED");
+            identity.setNIN(nin);
+        	uin = getUinFromNin(nin);
+        	if ("AD".equalsIgnoreCase(uin)) {
+                requestData.setStatus("ALREADY DEACTIVATED");
+            } else if ("No Record Present in ID-repo".equalsIgnoreCase(uin)) {
+                requestData.setStatus("No Record Present in ID-repo");
+            }
+        } else if (regId != null && !regId.isEmpty()) {
+        	uin = getUin(regId);
         }
-
+        
         if (isNotBlank(updateDetailsInfo.get(2))) {
             LocalizedValue surnameValue = new LocalizedValue();
             surnameValue.setLanguage("eng");
@@ -557,8 +562,15 @@ public class PacketServiceImpl implements PacketService {
         
         if (isNotBlank(updateDetailsInfo.get(8))) {
             LocalizedValue remarkValue = new LocalizedValue();
+            if (uin != null && 
+                    !"AD".equalsIgnoreCase(uin) && 
+                    !"No Record Present in ID-repo".equalsIgnoreCase(uin)) {
+                    identity.setUIN(uin);
+                	requestData.setStatus("DEACTIVATED");
+            }
             remarkValue.setLanguage("eng");
-            remarkValue.setValue("Duplicate of " + updateDetailsInfo.get(8));
+//            remarkValue.setValue("Duplicate of " + updateDetailsInfo.get(8));
+            remarkValue.setValue(updateDetailsInfo.get(8));
             identity.setRemark(Collections.singletonList(remarkValue));
         }
         
@@ -604,6 +616,10 @@ public class PacketServiceImpl implements PacketService {
                     });
 
             ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+            
+            if (responseWrapper == null || responseWrapper.getResponse() == null) {
+                return "No Record Present in ID-repo";
+            }
 
             if (responseWrapper.getResponse() != null) {
                 NINStatusResponseDTO response = responseWrapper.getResponse();
@@ -613,6 +629,44 @@ public class PacketServiceImpl implements PacketService {
             }
         } catch (RestClientException e) {
             System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            return null;
+        }
+		return null;
+    }
+    
+    public String getUinFromNin(String nin) {
+        String handle = nin.toLowerCase();
+        String url = idRepoUrl + handle + "@nin";
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata").queryParam("idType", "handle");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+                    });
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+            
+            if (responseWrapper == null || responseWrapper.getResponse() == null) {
+                return "No Record Present in ID-repo";
+            }
+            
+            NINStatusResponseDTO response = responseWrapper.getResponse();
+            if ("DEACTIVATED".equalsIgnoreCase(response.getStatus())) {
+                return "AD";
+            }
+
+            if ("ACTIVATED".equalsIgnoreCase(response.getStatus())) {
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode identityJson = mapper.valueToTree(response.getIdentity());
+                return identityJson.get("UIN").asText();
+            }
+        } catch (RestClientException e) {
+            System.err.println("Exception for nin " + nin + ": " + e.getMessage());
             return null;
         }
 		return null;
@@ -852,7 +906,15 @@ public class PacketServiceImpl implements PacketService {
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         UpdateRequestDTO updateRequestDTO = createUpdateRequest(updateDetailsInfo);
-
+        if (updateRequestDTO.getRequest().getStatus() != null && updateRequestDTO.getRequest().getStatus().equalsIgnoreCase("ALREADY DEACTIVATED")) {
+        	System.out.println("Already DEACTIVATED in ID repo: " + updateDetailsInfo.get(1));
+        	ninStatusDTO.setStatus("Already DEACTIVATED");
+            return ninStatusDTO;
+        } else if (updateRequestDTO.getRequest().getStatus() != null && updateRequestDTO.getRequest().getStatus().equalsIgnoreCase("No Record Present in ID-repo")) {
+        	System.out.println("No Record Present in ID-repo: " + updateDetailsInfo.get(1));
+        	ninStatusDTO.setStatus("No Record Present in ID-repo");
+            return ninStatusDTO;
+        } 
         HttpEntity<UpdateRequestDTO> entity = new HttpEntity<>(updateRequestDTO, headers);
 
         try {
