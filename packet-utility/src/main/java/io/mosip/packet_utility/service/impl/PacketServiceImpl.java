@@ -977,7 +977,7 @@ public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
 
         UriComponentsBuilder builder =
                 UriComponentsBuilder.fromHttpUrl(url)
-                        .queryParam("type", "all");
+                        .queryParam("type", "demo");
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
