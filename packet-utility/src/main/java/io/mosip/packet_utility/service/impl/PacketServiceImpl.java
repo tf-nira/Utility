@@ -73,7 +73,7 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.mosip.output.file.path}")
     private String filepath;
 
-    private Boolean allField =false;
+    private Boolean allField =true;
 
     private final Executor executor = Executors.newFixedThreadPool(200);
 
@@ -621,7 +621,7 @@ public class PacketServiceImpl implements PacketService {
         String handle = nin.toLowerCase() + "@nin";
         String url = idRepoUrl + handle;
 
-        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "all")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata")
                 .queryParam("idType", "handle");
 
         HttpHeaders headers = new HttpHeaders();
@@ -961,9 +961,11 @@ public class PacketServiceImpl implements PacketService {
             LocalDate dob = LocalDate.parse(applicationProcessingDTO.getDateOfBirth(), dobFormatter);
             OffsetDateTime odt = OffsetDateTime.parse(applicationProcessingDTO.getPacketCreatedDate());
             LocalDate packetDate = odt.toLocalDate();
-            int age = Period.between(dob, packetDate).getYears();
-            applicationProcessingDTO.setApplicantAge(String.valueOf(age));
-            if (age<2 || age >70){
+            Period period = Period.between(dob, packetDate);
+            double age = period.getYears() + (period.getMonths() / 12.0);
+            applicationProcessingDTO.setApplicantAge(String.format("%.2f", age));
+
+            if (age >=16){
                 applicationProcessingDTO.setRemark("REPROCESSABLE");
             }
             else
