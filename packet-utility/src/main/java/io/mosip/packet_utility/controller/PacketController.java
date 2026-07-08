@@ -89,4 +89,16 @@ public class PacketController {
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
     }
+
+    @GetMapping("/extractFaceBiometrics")
+    public ResponseEntity<String> extractFaceBiometrics() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.extractFaceBiometrics();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("Face biometric extraction started. Check server logs for progress.");
+    }
 }

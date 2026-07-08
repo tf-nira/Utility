@@ -25,6 +25,9 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -37,6 +40,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.*;
@@ -63,6 +67,9 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.moisp.packet.manager.metaInfo}")
     private String metainfo;
+
+    @Value("${io.moisp.packet.manager.biometrics.url}")
+    private String biometricsUrl;
 
     @Value("${io.mosip.id.repo.fetch.nin-details.url}")
     private String idRepoUrl;
@@ -489,6 +496,36 @@ public class PacketServiceImpl implements PacketService {
             batches.add(records.subList(i, end));
         }
         return batches;
+    }
+
+    private List<String[]> readRegProcessCSV(String fileName) throws IOException, CsvValidationException {
+        List<String[]> records = new ArrayList<>();
+        Resource resource = new ClassPathResource(fileName);
+
+        try (Reader fileReader = new InputStreamReader(resource.getInputStream());
+             CSVReader reader = new CSVReader(fileReader)) {
+
+            String[] line;
+            while ((line = reader.readNext()) != null) {
+                if (line.length < 2) {
+                    continue;
+                }
+
+                String regId = line[0].trim();
+                String recordProcess = line[1].trim();
+
+                if ("reg_id".equalsIgnoreCase(regId) || "process".equalsIgnoreCase(recordProcess)) {
+                    continue;
+                }
+
+                if (StringUtils.isNotEmpty(regId) && StringUtils.isNotEmpty(recordProcess)) {
+                    records.add(new String[]{regId, recordProcess});
+                }
+            }
+        }
+
+        System.out.println("Total records read from " + fileName + " :: " + records.size());
+        return records;
     }
 
     public UpdateRequestDTO createUpdateRequest(List<String> updateDetailsInfo) {
@@ -1136,6 +1173,249 @@ public class PacketServiceImpl implements PacketService {
 
 
     return prnApplication;
+    }
+
+    @Override
+    public void extractFaceBiometrics() throws Exception {
+        List<String[]> inputList = readRegProcessCSV("reg_process.csv");
+
+        if (inputList.isEmpty()) {
+            System.out.println("No records found in reg_process.csv. Exiting.");
+            return;
+        }
+
+        int batchSize = 10;
+        List<List<String[]>> batches = new ArrayList<>();
+        for (int i = 0; i < inputList.size(); i += batchSize) {
+            batches.add(inputList.subList(i, Math.min(i + batchSize, inputList.size())));
+        }
+
+        Path outputDir = Paths.get(filepath, "face-biometrics");
+        Files.createDirectories(outputDir);
+
+        Path outputPath = Paths.get(filepath, "face_biometrics_output.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath);
+             CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            csvWriter.writeNext(new String[]{"reg_id", "process", "status", "raw_file", "image_file", "remark"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + inputList.size() + " biometric records in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String[]> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size());
+
+                List<CompletableFuture<FaceBiometricResultDTO>> futures = batch.stream()
+                        .map(record -> CompletableFuture.supplyAsync(
+                                () -> extractFaceBiometric(record[0], record[1], outputDir), executor)
+                                .exceptionally(ex -> {
+                                    FaceBiometricResultDTO result = new FaceBiometricResultDTO();
+                                    result.setRegId(record[0]);
+                                    result.setProcess(record[1]);
+                                    result.setStatus("FAILED");
+                                    result.setRemark(ex.getMessage());
+                                    return result;
+                                }))
+                        .collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    allOf.get(5, TimeUnit.MINUTES);
+
+                    for (CompletableFuture<FaceBiometricResultDTO> future : futures) {
+                        FaceBiometricResultDTO result = future.get();
+                        csvWriter.writeNext(new String[]{
+                                result.getRegId(),
+                                result.getProcess(),
+                                result.getStatus(),
+                                result.getRawFile(),
+                                result.getImageFile(),
+                                result.getRemark()
+                        });
+                    }
+
+                    csvWriter.flush();
+                    System.out.println("Completed batch " + (i + 1));
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                Thread.sleep(1000);
+            }
+        }
+
+        System.out.println("Face biometric extraction completed. Output CSV: " + outputPath.toAbsolutePath());
+    }
+
+    private FaceBiometricResultDTO extractFaceBiometric(String regId, String recordProcess, Path outputDir) {
+        FaceBiometricResultDTO result = new FaceBiometricResultDTO();
+        result.setRegId(regId);
+        result.setProcess(recordProcess);
+
+        try {
+            JsonNode response = callBiometrics(regId, recordProcess);
+            JsonNode segments = response.path("response").path("segments");
+
+            if (!segments.isArray() || segments.size() == 0) {
+                result.setStatus("NO_FACE");
+                result.setRemark("No biometric segments found");
+                return result;
+            }
+
+            JsonNode faceSegment = null;
+            for (JsonNode segment : segments) {
+                JsonNode types = segment.path("bdbInfo").path("type");
+                if (containsText(types, "FACE")) {
+                    faceSegment = segment;
+                    break;
+                }
+            }
+
+            if (faceSegment == null) {
+                result.setStatus("NO_FACE");
+                result.setRemark("Face segment not found");
+                return result;
+            }
+
+            String bdb = faceSegment.path("bdb").asText(null);
+            if (StringUtils.isEmpty(bdb)) {
+                result.setStatus("NO_BDB");
+                result.setRemark("Face segment has no BDB");
+                return result;
+            }
+
+            byte[] bdbBytes = Base64.getDecoder().decode(bdb);
+            byte[] imageBytes = extractImageBytesFromBdb(bdbBytes);
+            String imageExtension = isJpeg2000CodeStream(imageBytes) ? "j2k" : "jp2";
+
+            Path rawFile = outputDir.resolve(regId + "_" + recordProcess + "_face." + imageExtension);
+            Files.write(rawFile, imageBytes);
+
+            result.setRawFile(rawFile.toAbsolutePath().toString());
+
+            Path imageFile = tryWritePng(regId, recordProcess, outputDir, imageBytes);
+            if (imageFile != null) {
+                result.setImageFile(imageFile.toAbsolutePath().toString());
+                result.setStatus("SUCCESS");
+                result.setRemark("Face image payload extracted from BDB and converted to PNG");
+            } else {
+                result.setStatus("RAW_SAVED");
+                result.setRemark("Face image payload extracted from BDB, but PNG conversion codec is not available in this JVM");
+            }
+
+            return result;
+        } catch (Exception e) {
+            result.setStatus("FAILED");
+            result.setRemark(e.getMessage());
+            return result;
+        }
+    }
+
+    private JsonNode callBiometrics(String regId, String recordProcess) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(biometricsUrl);
+
+        BiometricsRequestDTO requestDTO = new BiometricsRequestDTO();
+        requestDTO.setId(regId);
+        requestDTO.setPerson("individualBiometrics");
+        requestDTO.setModalities(new ArrayList<>());
+        requestDTO.setSource("MIGRATOR".equalsIgnoreCase(recordProcess) ? "DATAMIGRATOR" : source);
+        requestDTO.setProcess(recordProcess);
+        requestDTO.setBypassCache(true);
+
+        RequestWrapper<BiometricsRequestDTO> wrapper = new RequestWrapper<>();
+        wrapper.setId("mosip.registration.packet.reader");
+        wrapper.setVersion("v1");
+        wrapper.setRequesttime(LocalDateTime.now(ZoneOffset.UTC));
+        wrapper.setMetadata(Collections.emptyMap());
+        wrapper.setRequest(requestDTO);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<RequestWrapper<BiometricsRequestDTO>> entity = new HttpEntity<>(wrapper, headers);
+
+        ResponseEntity<JsonNode> response = restTemplate.exchange(
+                builder.build().toUri(),
+                HttpMethod.POST,
+                entity,
+                JsonNode.class
+        );
+
+        return response.getBody();
+    }
+
+    private boolean containsText(JsonNode values, String expectedValue) {
+        if (values == null || !values.isArray()) {
+            return false;
+        }
+
+        for (JsonNode value : values) {
+            if (expectedValue.equalsIgnoreCase(value.asText())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private byte[] extractImageBytesFromBdb(byte[] bdbBytes) {
+        int jp2Start = indexOf(bdbBytes, new byte[]{0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20});
+        if (jp2Start >= 0) {
+            return Arrays.copyOfRange(bdbBytes, jp2Start, bdbBytes.length);
+        }
+
+        int ftypStart = indexOf(bdbBytes, new byte[]{0x66, 0x74, 0x79, 0x70, 0x6A, 0x70, 0x32});
+        if (ftypStart >= 4) {
+            return Arrays.copyOfRange(bdbBytes, ftypStart - 4, bdbBytes.length);
+        }
+
+        int codestreamStart = indexOf(bdbBytes, new byte[]{(byte) 0xFF, 0x4F, (byte) 0xFF, 0x51});
+        if (codestreamStart >= 0) {
+            return Arrays.copyOfRange(bdbBytes, codestreamStart, bdbBytes.length);
+        }
+
+        return bdbBytes;
+    }
+
+    private int indexOf(byte[] source, byte[] pattern) {
+        for (int i = 0; i <= source.length - pattern.length; i++) {
+            boolean matched = true;
+            for (int j = 0; j < pattern.length; j++) {
+                if (source[i + j] != pattern[j]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private boolean isJpeg2000CodeStream(byte[] imageBytes) {
+        return imageBytes.length >= 4
+                && imageBytes[0] == (byte) 0xFF
+                && imageBytes[1] == 0x4F
+                && imageBytes[2] == (byte) 0xFF
+                && imageBytes[3] == 0x51;
+    }
+
+    private Path tryWritePng(String regId, String recordProcess, Path outputDir, byte[] imageBytes) throws IOException {
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageBytes));
+        if (image == null) {
+            return null;
+        }
+
+        Path imageFile = outputDir.resolve(regId + "_" + recordProcess + "_face.png");
+        ImageIO.write(image, "png", imageFile.toFile());
+        return imageFile;
     }
 }
 
