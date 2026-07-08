@@ -518,6 +518,8 @@ public class PacketServiceImpl implements PacketService {
                 requestData.setStatus("No Record Present in ID-repo");
             }
         } else if (regId != null && !regId.isEmpty()) {
+        	nin = getNINFromRid(regId);
+        	identity.setNIN(nin);
         	uin = getUin(regId);
         }
         
@@ -569,8 +571,9 @@ public class PacketServiceImpl implements PacketService {
                 	requestData.setStatus("DEACTIVATED");
             }
             remarkValue.setLanguage("eng");
-//            remarkValue.setValue("Duplicate of " + updateDetailsInfo.get(8));
-            remarkValue.setValue(updateDetailsInfo.get(8));
+            remarkValue.setValue("Duplicate of " + updateDetailsInfo.get(8));
+//            remarkValue.setValue("STOP_LISTED NIN - Duplicate of " + updateDetailsInfo.get(8));
+//            remarkValue.setValue(updateDetailsInfo.get(8));
             identity.setRemark(Collections.singletonList(remarkValue));
         }
         
@@ -598,6 +601,40 @@ public class PacketServiceImpl implements PacketService {
         updateRequestDto.setRequest(requestData);
 
         return updateRequestDto;
+    }
+    
+    public String getNINFromRid(String rid) {
+        String handle = rid;
+        String url = idRepoUrl + handle;
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+                    });
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+            
+            if (responseWrapper == null || responseWrapper.getResponse() == null) {
+                return "No Record Present in ID-repo";
+            }
+
+            if (responseWrapper.getResponse() != null) {
+                NINStatusResponseDTO response = responseWrapper.getResponse();
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode identityJson = mapper.valueToTree(response.getIdentity());
+                return identityJson.get("NIN").asText();
+            }
+        } catch (RestClientException e) {
+            System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            return null;
+        }
+		return null;
     }
     
     public String getUin(String rid) {
@@ -897,8 +934,12 @@ public class PacketServiceImpl implements PacketService {
 
     public NinStatusDTO updateDetails(List<String> updateDetailsInfo) {
         NinStatusDTO ninStatusDTO = new NinStatusDTO();
-        ninStatusDTO.setNin(updateDetailsInfo.get(1));
-
+        if(isNotBlank(updateDetailsInfo.get(1))) {
+        	ninStatusDTO.setNin(updateDetailsInfo.get(1));
+        } else {
+        	ninStatusDTO.setNin(getNINFromRid(updateDetailsInfo.get(0)));
+        }
+        
         String url = updateIdentityUrl;
         UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
 
