@@ -160,10 +160,10 @@ public class PacketServiceImpl implements PacketService {
 
     @Override
     public void getPacketCentreAndOperator() throws Exception {
-        List<String> ninList = readNINsFromCSV(true);
+        List<List<String>> registrationProcessRows = readRegistrationProcessCSV();
 
         int batchSize = 25;
-        List<List<String>> batches = createBatches(ninList, batchSize);
+        List<List<List<String>>> batches = createMultiFieldBatches(registrationProcessRows, batchSize);
 
         Path outputPath = Paths.get(filepath, "cntr-opid.csv");
 
@@ -173,21 +173,26 @@ public class PacketServiceImpl implements PacketService {
             csvWriter.writeNext(new String[] { "RID","CENTRE", "OPERATORID","SUPERVISORID" });
             csvWriter.flush();
 
-            System.out.println("Processing " + ninList.size() + " RIDs in " + batches.size() + " batches");
+            System.out.println("Processing " + registrationProcessRows.size() + " RIDs in " + batches.size() + " batches");
 
             for (int i = 0; i < batches.size(); i++) {
-                List<String> batch = batches.get(i);
+                List<List<String>> batch = batches.get(i);
                 System.out.println(
                         "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
 
                 // Processing batch in parallel
-                List<CompletableFuture<CenterResultDTO>> futures = batch.stream().map(rid -> CompletableFuture
-                        .supplyAsync(() -> getcentrandid(rid), executor).handle((centerResultDTO, throwable) -> {
-                            if (throwable != null) {
-                                System.err.println("Error checking RID " + rid + ": " + throwable.getMessage());
-                            }
-                            return centerResultDTO;
-                        })).collect(Collectors.toList());
+                List<CompletableFuture<CenterResultDTO>> futures = batch.stream().map(row -> {
+                    String rid = row.get(0);
+                    String rowProcess = row.size() > 1 && StringUtils.isNotEmpty(row.get(1)) ? row.get(1) : process;
+                    return CompletableFuture
+                            .supplyAsync(() -> getcentrandid(rid, rowProcess), executor)
+                            .handle((centerResultDTO, throwable) -> {
+                                if (throwable != null) {
+                                    System.err.println("Error checking RID " + rid + ": " + throwable.getMessage());
+                                }
+                                return centerResultDTO;
+                            });
+                }).collect(Collectors.toList());
 
                 // Waiting for all futures in the batch to complete
                 CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
@@ -381,6 +386,35 @@ public class PacketServiceImpl implements PacketService {
         return list;
     }
 
+    public List<List<String>> readRegistrationProcessCSV() throws IOException, CsvValidationException {
+        Resource resource = new ClassPathResource("reg_process.csv");
+        if (!resource.exists()) {
+            resource = new ClassPathResource("rids.csv");
+        }
+        return readRegistrationProcessCSV(new InputStreamReader(resource.getInputStream()));
+    }
+
+    public List<List<String>> readRegistrationProcessCSV(Reader reader) throws IOException, CsvValidationException {
+        List<List<String>> records = new ArrayList<>();
+
+        try (CSVReader csvReader = new CSVReader(reader)) {
+            String[] line;
+            while ((line = csvReader.readNext()) != null) {
+                List<String> row = Arrays.stream(line)
+                        .map(String::trim)
+                        .collect(Collectors.toList());
+                if (!row.isEmpty() && StringUtils.isNotEmpty(row.get(0))) {
+                    records.add(row);
+                }
+            }
+            System.out.println("Total registration/process records read from csv file :: " + records.size());
+        } catch (Exception e) {
+            System.out.println("Exception occurred while reading registration/process csv: " + e);
+            throw e;
+        }
+        return records;
+    }
+
     public List<List<String>> readMultiFieldCSV() throws IOException, CsvValidationException {
 
         List<List<String>> records = new ArrayList<>();
@@ -541,11 +575,10 @@ public class PacketServiceImpl implements PacketService {
         }
     }
 
-    public CenterResultDTO  getcentrandid (String rid) {
+    public CenterResultDTO  getcentrandid (String rid, String requestProcess) {
         CenterResultDTO centerResultDTO = new CenterResultDTO();
         centerResultDTO.setRid(rid);
-        //process needs to be changed accordingly
-        InfoDto fieldDto = new InfoDto(rid, source, process, false);
+        InfoDto fieldDto = new InfoDto(rid, source, requestProcess, false);
         RequestWrapper<InfoDto> request = new RequestWrapper<>();
         request.setId(rid);
         request.setVersion("v1");
