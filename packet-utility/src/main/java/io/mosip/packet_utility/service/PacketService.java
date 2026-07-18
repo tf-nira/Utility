@@ -12,4 +12,6 @@ public interface PacketService {
     public void getAge() throws  Exception;
     public void getPrn() throws  Exception;
     public void extractFaceBiometrics() throws Exception;
+    public void addOrUpdateMergedTag() throws Exception;
+    public void searchApplicantFields(String inputFile) throws Exception;
 }

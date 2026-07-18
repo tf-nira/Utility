@@ -21,6 +21,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -42,7 +43,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -65,11 +68,17 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
 
+    @Value("${io.moisp.packet.manager.search.multi.fields.url}")
+    private String searchMultiFieldUrl;
+
     @Value("${io.moisp.packet.manager.metaInfo}")
     private String metainfo;
 
     @Value("${io.moisp.packet.manager.biometrics.url}")
     private String biometricsUrl;
+
+    @Value("${io.moisp.packet.manager.add-or-update-tag.url}")
+    private String addOrUpdateTagUrl;
 
     @Value("${io.mosip.id.repo.fetch.nin-details.url}")
     private String idRepoUrl;
@@ -305,6 +314,99 @@ public class PacketServiceImpl implements PacketService {
             throw e;
         }
         return list;
+    }
+
+    @Override
+    public void addOrUpdateMergedTag() throws Exception {
+        List<String> regIds = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(regIds, batchSize);
+        Path outputPath = Paths.get(filepath, "add_or_update_tag_output.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"REG_ID", "STATUS"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + regIds.size() + " RIDs for IS-MERGED tag in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
+
+                List<CompletableFuture<String[]>> futures = batch.stream()
+                        .map(regId -> CompletableFuture.supplyAsync(() -> addOrUpdateMergedTag(regId), executor)
+                                .handle((result, throwable) -> {
+                                    if (throwable != null) {
+                                        System.err.println("Error updating tag for RID " + regId + ": " + throwable.getMessage());
+                                        return new String[]{regId, throwable.getMessage()};
+                                    }
+                                    return result;
+                                }))
+                        .collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    for (CompletableFuture<String[]> future : futures) {
+                        csvWriter.writeNext(future.get());
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                Thread.sleep(1000);
+            }
+        }
+
+        System.out.println("Packet tag update completed. Output CSV: " + outputPath.toAbsolutePath());
+    }
+
+    private String[] addOrUpdateMergedTag(String regId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        RequestWrapper<PacketTagRequestDTO> requestWrapper = new RequestWrapper<>();
+        requestWrapper.setId("packet-utility.add-or-update-tag");
+        requestWrapper.setVersion("1.0");
+        requestWrapper.setRequesttime(LocalDateTime.now(Clock.systemUTC()));
+        requestWrapper.setMetadata(new HashMap<>());
+
+        PacketTagRequestDTO packetTagRequestDTO = new PacketTagRequestDTO();
+        packetTagRequestDTO.setId(regId);
+
+        Map<String, String> tags = new HashMap<>();
+        tags.put("IS-MERGED", "true");
+        packetTagRequestDTO.setTags(tags);
+        requestWrapper.setRequest(packetTagRequestDTO);
+
+        HttpEntity<RequestWrapper<PacketTagRequestDTO>> entity = new HttpEntity<>(requestWrapper, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<Object>> responseEntity = restTemplate.exchange(addOrUpdateTagUrl,
+                    HttpMethod.POST, entity, new ParameterizedTypeReference<ResponseWrapper<Object>>() {
+                    });
+
+            ResponseWrapper<Object> responseWrapper = responseEntity.getBody();
+            if (responseWrapper != null && responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                return new String[]{regId, responseWrapper.getErrors().get(0).getMessage()};
+            }
+
+            return new String[]{regId, "SUCCESS"};
+        } catch (RestClientException e) {
+            System.err.println("Exception while updating tag for RID " + regId + ": " + e.getMessage());
+            return new String[]{regId, e.getMessage()};
+        }
     }
 
     @Override
@@ -937,6 +1039,163 @@ public class PacketServiceImpl implements PacketService {
                 );
 
         return response.getBody() != null ? response.getBody().getResponse() : null;
+    }
+
+    private NINStatusResponseDTO callIdRepoByApplicationId(String regId) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(idRepoUrl + regId)
+                .queryParam("type", "metadata");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> response = restTemplate.exchange(
+                    builder.build().toUri(),
+                    HttpMethod.GET,
+                    new HttpEntity<>(null, headers),
+                    new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {}
+            );
+            return response.getBody() != null ? response.getBody().getResponse() : null;
+        } catch (HttpClientErrorException e) {
+            if (HttpStatus.NOT_FOUND.equals(e.getStatusCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private FieldsDTO callSearchFields(String regId, String recordProcess, String[] fields) {
+        MultiFieldRequestDTO requestDTO = new MultiFieldRequestDTO();
+        requestDTO.setId(regId);
+        requestDTO.setFields(fields);
+        requestDTO.setProcess(recordProcess);
+        requestDTO.setSource("MIGRATOR".equalsIgnoreCase(recordProcess) ? "DATAMIGRATOR" : source);
+        requestDTO.setBypassCache(true);
+
+        RequestWrapper<MultiFieldRequestDTO> wrapper = new RequestWrapper<>();
+        wrapper.setRequest(requestDTO);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<ResponseWrapper<FieldsDTO>> response = restTemplate.exchange(
+                UriComponentsBuilder.fromHttpUrl(searchMultiFieldUrl).build().toUri(),
+                HttpMethod.POST,
+                new HttpEntity<>(wrapper, headers),
+                new ParameterizedTypeReference<ResponseWrapper<FieldsDTO>>() {}
+        );
+        return response.getBody() != null ? response.getBody().getResponse() : null;
+    }
+
+    @Override
+    public void searchApplicantFields(String inputFile) throws Exception {
+        final int batchSize = 25;
+        String[] requestedFields = {"NIN", "surname", "givenName", "otherNames", "gender", "dateOfBirth"};
+        List<String[]> records = readRegProcessCSV(inputFile);
+        int totalBatches = (records.size() + batchSize - 1) / batchSize;
+        Path outputPath = Paths.get(filepath, "applicant-fields.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"reg_id", "process", "source", "NIN", "surname", "givenName",
+                    "otherNames", "gender", "dateOfBirth", "remark"});
+
+            for (int start = 0; start < records.size(); start += batchSize) {
+                List<String[]> batch = records.subList(start, Math.min(start + batchSize, records.size()));
+                int batchNumber = (start / batchSize) + 1;
+                System.out.println("Processing applicant-fields batch " + batchNumber + "/" + totalBatches
+                        + " (" + batch.size() + " records)");
+                List<CompletableFuture<String[]>> futures = batch.stream()
+                        .map(record -> CompletableFuture.supplyAsync(
+                                () -> searchApplicantFields(record, requestedFields), executor))
+                        .collect(Collectors.toList());
+
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(2, TimeUnit.MINUTES);
+
+                for (CompletableFuture<String[]> future : futures) {
+                    csvWriter.writeNext(future.get());
+                }
+                csvWriter.flush();
+                System.out.println("Completed applicant-fields batch " + batchNumber + "/" + totalBatches);
+            }
+        }
+    }
+
+    private String[] searchApplicantFields(String[] record, String[] requestedFields) {
+        String regId = record[0];
+        String recordProcess = record[1];
+        Map<String, Object> fields = new HashMap<>();
+        String resultSource = "ID_REPO";
+        String remark = "";
+
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+            if (idRepoResponse != null && idRepoResponse.getIdentity() != null) {
+                fields.putAll(objectMapper.convertValue(idRepoResponse.getIdentity(), Map.class));
+            } else {
+                resultSource = "PACKET_MANAGER";
+                FieldsDTO packetResponse = callSearchFields(regId, recordProcess, requestedFields);
+                if (packetResponse != null && packetResponse.getFields() != null) {
+                    fields.putAll(packetResponse.getFields());
+                } else {
+                    remark = "No record found in ID Repo or Packet Manager";
+                }
+            }
+        } catch (Exception e) {
+            resultSource = "ERROR";
+            remark = e.getMessage();
+        }
+
+        String[] row = new String[10];
+        row[0] = regId;
+        row[1] = recordProcess;
+        row[2] = resultSource;
+        for (int i = 0; i < requestedFields.length; i++) {
+            row[i + 3] = cleanFieldValue(fields.get(requestedFields[i]));
+        }
+        row[9] = remark;
+        return row;
+    }
+
+    private String cleanFieldValue(Object value) {
+        if (value == null) {
+            return "";
+        }
+
+        JsonNode node = objectMapper.valueToTree(value);
+        if (node.isTextual()) {
+            String text = node.asText().trim();
+            if (text.startsWith("[") || text.startsWith("{")) {
+                try {
+                    node = objectMapper.readTree(text);
+                } catch (JsonProcessingException ignored) {
+                    // Not JSON text; return the original string below.
+                }
+            }
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (item.hasNonNull("value")) {
+                    return stripQuotes(item.get("value").asText());
+                }
+            }
+        }
+        if (node.hasNonNull("value")) {
+            return stripQuotes(node.get("value").asText());
+        }
+        if (node.isValueNode()) {
+            return stripQuotes(node.asText());
+        }
+
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private String stripQuotes(String value) {
+        return value == null ? "" : value.replaceAll("^\\\"+|\\\"+$", "");
     }
     public ApplicationProcessingDTO getApplicantAge(String regId, String process) {
 
