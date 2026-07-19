@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Application Reports</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+    margin: 20px;
+    background: #fff;
+}
+
+
+/* =========================
+   COMMON REPORT STYLE
+========================= */
+
+.report {
+    border-collapse: collapse;
+    border: 1px solid #000;
+}
+
+.report th,
+.report td {
+    border: 1px solid #000;
+    padding: 4px 6px;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+
+.title {
+    background: #2f5d8a;
+    color: #fff;
+    text-align: center;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+
+.header {
+    background: #cfe2f3;
+    text-align: center;
+    font-weight: bold;
+}
+
+
+.left {
+    text-align: left;
+}
+
+.center {
+    text-align: center;
+}
+
+.right {
+    text-align: right;
+}
+
+
+.section {
+    text-align: center;
+    font-weight: bold;
+    vertical-align: middle;
+}
+
+
+.total-row td {
+    font-weight: bold;
+}
+
+
+.large-number {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+
+/* Table widths */
+
+.application-report {
+    width:620px;
+}
+
+.service-report {
+    width:620px;
+}
+
+.ma-report {
+    width:420px;
+}
+
+.analysis-report {
+    width:975px;
+}
+
+.printing-report {
+    width:625px;
+}
+
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!-- =====================================
+     REPORT 1 : ALL APPLICATIONS
+===================================== -->
+
+
+<table class="report application-report">
+
+<tr>
+<th colspan="3" class="title">
+All Applications [All Service Types]
+</th>
+</tr>
+
+
+<tr class="header">
+<td>Date</td>
+<td></td>
+<td>Cumulative Total</td>
+</tr>
+
+
+<tr>
+<td></td>
+<td class="left"><b>Total Applications</b></td>
+<td class="right"><b>{{TOTAL_APPLICATIONS}}</b></td>
+</tr>
+
+
+<tr>
+<td rowspan="4" class="section">
+In Progress
+</td>
+
+<td class="left">
+PROCESSING
+</td>
+
+<td class="right">
+{{PROCESSING}}
+</td>
+
+</tr>
+
+
+<tr>
+<td class="left">ON_HOLD</td>
+<td class="right">{{ON_HOLD}}</td>
+</tr>
+
+
+<tr>
+<td class="left">REPROCESS</td>
+<td class="right">{{REPROCESS}}</td>
+</tr>
+
+
+<tr>
+<td class="left">REPROCESS_FAILED</td>
+<td class="right">{{REPROCESS_FAILED}}</td>
+</tr>
+
+
+
+<tr>
+
+<td rowspan="3" class="section">
+Unsuccessful
+</td>
+
+<td class="left">
+REJECTED
+</td>
+
+<td class="right">
+{{REJECTED}}
+</td>
+
+</tr>
+
+
+<tr>
+<td class="left">
+PAUSED_FOR_ADDITIONAL_INFO
+</td>
+
+<td class="right">
+{{PAUSED_FOR_ADDITIONAL_INFO}}
+</td>
+</tr>
+
+
+<tr>
+<td class="left">
+FAILED
+</td>
+
+<td class="right">
+{{FAILED}}
+</td>
+</tr>
+
+
+
+<tr>
+
+<td class="section">
+Successfully Processed
+</td>
+
+<td class="left">
+<b>PROCESSED</b>
+</td>
+
+<td class="right">
+<b>{{PROCESSED}}</b>
+</td>
+
+</tr>
+
+
+</table>
+
+<div style="height:75px;line-height:75px;">&nbsp;</div>
+
+<!-- =====================================
+     REPORT 2 : STATISTICS BY SERVICE TYPE
+===================================== -->
+
+<table class="report service-report">
+
+<tr>
+<th colspan="4" class="title">
+Statistics By Service Type [Summary]
+</th>
+</tr>
+
+
+<tr class="header">
+
+<td class="left">
+Date
+</td>
+
+<td>
+{{DATE1}}
+</td>
+
+<td>
+{{DATE2}}
+</td>
+
+<td>
+Cumulative Total
+</td>
+
+</tr>
+
+
+
+<tr class="total-row">
+
+<td class="left">
+Total Applications
+</td>
+
+<td class="right">
+{{TOTAL_DATE1}}
+</td>
+
+<td class="right">
+{{TOTAL_DATE2}}
+</td>
+
+<td class="right">
+{{TOTAL_CUMULATIVE}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+New Registration
+</td>
+
+<td class="right">
+{{NEW_REGISTRATION_DATE1}}
+</td>
+
+<td class="right">
+{{NEW_REGISTRATION_DATE2}}
+</td>
+
+<td class="right">
+{{NEW_REGISTRATION_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+Renewal
+</td>
+
+<td class="right">
+{{RENEWAL_DATE1}}
+</td>
+
+<td class="right">
+{{RENEWAL_DATE2}}
+</td>
+
+<td class="right">
+{{RENEWAL_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+Get First ID
+</td>
+
+<td class="right">
+{{GET_FIRST_ID_DATE1}}
+</td>
+
+<td class="right">
+{{GET_FIRST_ID_DATE2}}
+</td>
+
+<td class="right">
+{{GET_FIRST_ID_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+Lost
+</td>
+
+<td class="right">
+{{LOST_DATE1}}
+</td>
+
+<td class="right">
+{{LOST_DATE2}}
+</td>
+
+<td class="right">
+{{LOST_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+Change of Particular
+</td>
+
+<td class="right">
+{{CHANGE_PARTICULAR_DATE1}}
+</td>
+
+<td class="right">
+{{CHANGE_PARTICULAR_DATE2}}
+</td>
+
+<td class="right">
+{{CHANGE_PARTICULAR_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+BIOMETRIC CORRECTION
+</td>
+
+<td class="right">
+{{BIOMETRIC_DATE1}}
+</td>
+
+<td class="right">
+{{BIOMETRIC_DATE2}}
+</td>
+
+<td class="right">
+{{BIOMETRIC_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+ALIEN New Registration
+</td>
+
+<td class="right">
+{{ALIEN_DATE1}}
+</td>
+
+<td class="right">
+{{ALIEN_DATE2}}
+</td>
+
+<td class="right">
+{{ALIEN_TOTAL}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td class="left">
+CRVS_NEW
+</td>
+
+<td class="right">
+{{CRVS_DATE1}}
+</td>
+
+<td class="right">
+{{CRVS_DATE2}}
+</td>
+
+<td class="right">
+{{CRVS_TOTAL}}
+</td>
+
+</tr>
+
+
+</table>
+
+<div style="height:75px;line-height:75px;">&nbsp;</div>
+
+<!-- =====================================
+     REPORT 3 : MA STATISTICS
+===================================== -->
+
+
+<table class="report ma-report">
+
+
+<tr>
+
+<th colspan="3" class="title">
+MA Statistics
+</th>
+
+</tr>
+
+
+
+<tr class="header">
+
+<td>
+Date
+</td>
+
+<td>
+{{CURRENT_DATE}}
+</td>
+
+<td>
+{{PREVIOUS_DATE}}
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td class="left">
+<b>Total Applications</b>
+</td>
+
+<td class="right large-number">
+{{TOTAL_TODAY}}
+</td>
+
+<td class="right large-number">
+{{TOTAL_YESTERDAY}}
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td class="left">
+APPROVED
+</td>
+
+<td class="right">
+{{APPROVED_TODAY}}
+</td>
+
+<td class="right">
+{{APPROVED_YESTERDAY}}
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td class="left">
+INQUEUE
+</td>
+
+<td class="right">
+{{INQUEUE_TODAY}}
+</td>
+
+<td class="right">
+{{INQUEUE_YESTERDAY}}
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td class="left">
+REJECTED
+</td>
+
+<td class="right">
+{{REJECTED_TODAY}}
+</td>
+
+<td class="right">
+{{REJECTED_YESTERDAY}}
+</td>
+
+</tr>
+
+
+
+</table>
+
+<div style="height:75px;line-height:75px;">&nbsp;</div>
+
+<!-- =====================================
+     REPORT 4 : ANALYSIS OF PROCESSED PACKETS
+===================================== -->
+
+
+<table class="report analysis-report">
+
+
+<tr>
+
+<th colspan="5" class="title">
+Analysis of Processed Packets by Service
+</th>
+
+</tr>
+
+
+
+<tr class="header">
+
+<td colspan="2">
+Date
+</td>
+
+<td>
+{{today}}
+</td>
+
+<td>
+{{yesterday}}
+</td>
+
+<td>
+Cumulative Total
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td colspan="2" class="center">
+Total Applications
+</td>
+
+<td class="right large-number">
+{{totalToday}}
+</td>
+
+<td class="right large-number">
+{{totalYesterday}}
+</td>
+
+<td class="right large-number">
+{{totalCumulative}}
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td rowspan="5" class="section">
+OVER ALL
+</td>
+
+<td>
+PROCESSED
+</td>
+
+<td class="right">
+{{processedToday}}
+</td>
+
+<td class="right">
+{{processedYesterday}}
+</td>
+
+<td class="right">
+{{processedTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td>
+ON_HOLD
+</td>
+
+<td class="right">
+{{holdToday}}
+</td>
+
+<td class="right">
+{{holdYesterday}}
+</td>
+
+<td></td>
+
+</tr>
+
+
+
+<tr>
+
+<td>
+MA INQUEUE
+</td>
+
+<td class="right">
+{{maQueueToday}}
+</td>
+
+<td class="right">
+{{maQueueYesterday}}
+</td>
+
+<td class="right">
+{{maQueueTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td>
+MVS INQUEUE
+</td>
+
+<td class="right">
+{{mvsQueueToday}}
+</td>
+
+<td class="right">
+{{mvsQueueYesterday}}
+</td>
+
+<td class="right">
+{{mvsQueueTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td>
+FAILED
+</td>
+
+<td class="right">
+{{failedToday}}
+</td>
+
+<td class="right">
+{{failedYesterday}}
+</td>
+
+<td></td>
+
+</tr>
+
+
+
+
+
+<tr>
+
+<td colspan="2">
+Migration PROCESSED
+</td>
+
+<td class="right">
+{{migrationToday}}
+</td>
+
+<td class="right">
+{{migrationYesterday}}
+</td>
+
+<td class="right">
+{{migrationTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+Renewal PROCESSED
+</td>
+
+<td class="right">
+{{renewalToday}}
+</td>
+
+<td class="right">
+{{renewalYesterday}}
+</td>
+
+<td class="right">
+{{renewalTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+New PROCESSED
+</td>
+
+<td class="right">
+{{newToday}}
+</td>
+
+<td class="right">
+{{newYesterday}}
+</td>
+
+<td class="right">
+{{newTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+COP PROCESSED
+</td>
+
+<td class="right">
+{{copToday}}
+</td>
+
+<td class="right">
+{{copYesterday}}
+</td>
+
+<td class="right">
+{{copTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+LOST PROCESSED
+</td>
+
+<td class="right">
+{{lostToday}}
+</td>
+
+<td class="right">
+{{lostYesterday}}
+</td>
+
+<td class="right">
+{{lostTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+FIRSTID PROCESSED
+</td>
+
+<td class="right">
+{{firstToday}}
+</td>
+
+<td class="right">
+{{firstYesterday}}
+</td>
+
+<td class="right">
+{{firstTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+BIOMETRIC_CORRECTION PROCESSED
+</td>
+
+<td class="right">
+{{bioToday}}
+</td>
+
+<td class="right">
+{{bioYesterday}}
+</td>
+
+<td class="right">
+{{bioTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+ALIEN NEW PROCESSED
+</td>
+
+<td class="right">
+{{alienToday}}
+</td>
+
+<td class="right">
+{{alienYesterday}}
+</td>
+
+<td class="right">
+{{alienTotal}}
+</td>
+
+</tr>
+
+
+
+<tr>
+
+<td colspan="2">
+CRVS_NEW PROCESSED
+</td>
+
+<td class="right">
+{{crvsToday}}
+</td>
+
+<td class="right">
+{{crvsYesterday}}
+</td>
+
+<td class="right">
+{{crvsTotal}}
+</td>
+
+</tr>
+
+
+</table>
+
+<div style="height:75px;line-height:75px;">&nbsp;</div>
+
+<!-- =====================================
+     REPORT 5 : PRINTING
+===================================== -->
+
+
+<table class="report printing-report">
+
+
+<tr>
+
+<th colspan="5" class="title">
+Printing
+</th>
+
+</tr>
+
+
+
+
+<tr class="header">
+
+<td colspan="2">
+Date
+</td>
+
+<td>
+{{today}}
+</td>
+
+<td>
+{{yesterday}}
+</td>
+
+<td>
+Cumulative Total
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td>
+Printing
+</td>
+
+<td>
+Sent to perso
+</td>
+
+<td class="right">
+{{printingToday}}
+</td>
+
+<td class="right">
+{{printingYesterday}}
+</td>
+
+<td class="right">
+{{printingTotal}}
+</td>
+
+</tr>
+
+
+</table>
+
+<div style="height:75px;line-height:75px;">&nbsp;</div>
+
+<!-- =====================================
+     REPORT 6 : STORED IN IDA
+===================================== -->
+
+
+<table class="report">
+
+
+<tr>
+
+<th colspan="5" class="title">
+STORED IN IDA
+</th>
+
+</tr>
+
+
+
+<tr class="header">
+
+<td colspan="2">
+Date
+</td>
+
+<td>
+{{date1}}
+</td>
+
+<td>
+{{date2}}
+</td>
+
+<td>
+Cumulative Total
+</td>
+
+</tr>
+
+
+
+
+<tr>
+
+<td>
+IDA
+</td>
+
+<td>
+Stored
+</td>
+
+<td class="right">
+{{storedDate1}}
+</td>
+
+<td class="right">
+{{storedDate2}}
+</td>
+
+<td class="right">
+{{cumulativeTotal}}
+</td>
+
+</tr>
+
+
+</table>
+
+
+</body>
+
+</html>

@@ -78,12 +78,10 @@ public class EmailService {
         String authToken = getAuthToken();
         log.info("Sending email notification");
         try {
-            UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(emailNotificationUrl)
-                    .queryParam("mailTo", String.join(",", to))
-                    .queryParam("mailSubject", subject)
-                    .queryParam("mailContent", body);
-
             LinkedMultiValueMap<String, Object> params = new LinkedMultiValueMap<>();
+            params.add("mailTo", String.join(",", to));
+            params.add("mailSubject", subject);
+            params.add("mailContent", body);
             params.add("attachments", null);
 
             HttpHeaders headers = new HttpHeaders();
@@ -93,7 +91,7 @@ public class EmailService {
             HttpEntity<LinkedMultiValueMap<String, Object>> requestEntity = new HttpEntity<>(params, headers);
 
             ResponseEntity<ResponseWrapper> responseEntity = restTemplate.exchange(
-                    builder.build().toUri(),
+                    emailNotificationUrl,
                     HttpMethod.POST,
                     requestEntity,
                     ResponseWrapper.class
