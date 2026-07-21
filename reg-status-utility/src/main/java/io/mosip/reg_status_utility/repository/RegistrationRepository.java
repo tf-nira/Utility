@@ -18,6 +18,20 @@ public interface RegistrationRepository extends JpaRepository<RegistrationEntity
     @Query(value = "UPDATE regprc.registration SET status_code = 'PROCESSING' WHERE status_code = 'RESUMABLE' AND reg_stage_name IN ('MVSStage','ManualAdjudicationStage')", nativeQuery = true)
     void updateStatusCodes ();
 
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE regprc.registration " +
+            "SET status_code = 'RESUMABLE', " +
+            "latest_trn_status_code = 'REPROCESS', " +
+            "upd_dtimes = '2025-07-20 04:00:04.732181', " +
+            "trn_retry_count = 0, " +
+            "reg_process_retry_count = 0 " +
+            "WHERE reg_stage_name = 'PacketValidatorStage' " +
+            "AND process = 'CRVS_NEW' " +
+            "AND status_code IN ('PROCESSING', 'REPROCESS')",
+            nativeQuery = true)
+    int updateOpenCrvs();
+
     @Query(value = "SELECT r.status_code AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r GROUP BY r.status_code", nativeQuery = true)
     List<StatusCodeCountProjection> getStatusCodeCount ();
 }
