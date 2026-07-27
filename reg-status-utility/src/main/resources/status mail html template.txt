@@ -19,7 +19,6 @@ body {
     background: #fff;
 }
 
-
 /* =========================
    COMMON REPORT STYLE
 ========================= */
@@ -34,9 +33,8 @@ body {
     border: 1px solid #000;
     padding: 4px 6px;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: 15px;
 }
-
 
 .title {
     background: #2f5d8a;
@@ -46,13 +44,11 @@ body {
     font-weight: bold;
 }
 
-
 .header {
     background: #cfe2f3;
     text-align: center;
     font-weight: bold;
 }
-
 
 .left {
     text-align: left;
@@ -66,26 +62,20 @@ body {
     text-align: right;
 }
 
-
 .section {
     text-align: center;
     font-weight: bold;
     vertical-align: middle;
 }
 
-
 .total-row td {
     font-weight: bold;
 }
-
 
 .large-number {
     font-size: 18px;
     font-weight: bold;
 }
-
-
-/* Table widths */
 
 .application-report {
     width:620px;
@@ -96,30 +86,59 @@ body {
 }
 
 .ma-report {
-    width:420px;
+    width:520px;
+    table-layout: fixed;
 }
 
 .analysis-report {
-    width:975px;
+    width:1075px;
+    table-layout: fixed;
+}
+
+.analysis-report .title {
+    font-size:18px;
+}
+
+.analysis-report .header td {
+    font-size:15px;
+}
+
+.analysis-report td {
+    font-size:16px;
+}
+
+.analysis-report td:first-child {
+    width: 280px;
+    white-space: nowrap;
+}
+
+.ma-report td:first-child {
+    width: 180px;
+    white-space: nowrap;
+}
+
+.analysis-report .emph-value {
+    font-size:18px;
+    text-align:center;
 }
 
 .printing-report {
     width:625px;
 }
 
+.ida-report {
+    width:625px;
+}
 
 </style>
 
 </head>
 
-
 <body>
-
 
 <!-- =====================================
      REPORT 1 : ALL APPLICATIONS
 ===================================== -->
-
 
 <table class="report application-report">
 
@@ -129,22 +148,20 @@ All Applications [All Service Types]
 </th>
 </tr>
 
-
 <tr class="header">
 <td>Date</td>
 <td></td>
 <td>Cumulative Total</td>
 </tr>
 
-
 <tr>
 <td></td>
 <td class="left"><b>Total Applications</b></td>
-<td class="right"><b>{{TOTAL_APPLICATIONS}}</b></td>
+<td class="right"><b>{{AA_TOTAL_APPLICATIONS}}</b></td>
 </tr>
 
-
 <tr>
+
 <td rowspan="4" class="section">
 In Progress
 </td>
@@ -154,30 +171,25 @@ PROCESSING
 </td>
 
 <td class="right">
-{{PROCESSING}}
+{{AA_PROCESSING}}
 </td>
 
 </tr>
 
-
 <tr>
 <td class="left">ON_HOLD</td>
-<td class="right">{{ON_HOLD}}</td>
+<td class="right">{{AA_ON_HOLD}}</td>
 </tr>
-
 
 <tr>
 <td class="left">REPROCESS</td>
-<td class="right">{{REPROCESS}}</td>
+<td class="right">{{AA_REPROCESS}}</td>
 </tr>
-
 
 <tr>
 <td class="left">REPROCESS_FAILED</td>
-<td class="right">{{REPROCESS_FAILED}}</td>
+<td class="right">{{AA_REPROCESS_FAILED}}</td>
 </tr>
-
-
 
 <tr>
 
@@ -190,11 +202,10 @@ REJECTED
 </td>
 
 <td class="right">
-{{REJECTED}}
+{{AA_REJECTED}}
 </td>
 
 </tr>
-
 
 <tr>
 <td class="left">
@@ -202,10 +213,9 @@ PAUSED_FOR_ADDITIONAL_INFO
 </td>
 
 <td class="right">
-{{PAUSED_FOR_ADDITIONAL_INFO}}
+{{AA_PAUSED_FOR_ADDITIONAL_INFO}}
 </td>
 </tr>
-
 
 <tr>
 <td class="left">
@@ -213,11 +223,9 @@ FAILED
 </td>
 
 <td class="right">
-{{FAILED}}
+{{AA_FAILED}}
 </td>
 </tr>
-
-
 
 <tr>
 
@@ -230,11 +238,10 @@ Successfully Processed
 </td>
 
 <td class="right">
-<b>{{PROCESSED}}</b>
+<b>{{AA_PROCESSED}}</b>
 </td>
 
 </tr>
-
 
 </table>
 
@@ -252,7 +259,6 @@ Statistics By Service Type [Summary]
 </th>
 </tr>
 
-
 <tr class="header">
 
 <td class="left">
@@ -260,11 +266,11 @@ Date
 </td>
 
 <td>
-{{DATE1}}
+{{SST_DATE1}}
 </td>
 
 <td>
-{{DATE2}}
+{{SST_DATE2}}
 </td>
 
 <td>
@@ -273,29 +279,25 @@ Cumulative Total
 
 </tr>
 
-
-
 <tr class="total-row">
 
-<td class="left">
+<td class="left no-wrap">
 Total Applications
 </td>
 
 <td class="right">
-{{TOTAL_DATE1}}
+{{SST_TOTAL_DATE1}}
 </td>
 
 <td class="right">
-{{TOTAL_DATE2}}
+{{SST_TOTAL_DATE2}}
 </td>
 
 <td class="right">
-{{TOTAL_CUMULATIVE}}
+{{SST_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -304,20 +306,18 @@ New Registration
 </td>
 
 <td class="right">
-{{NEW_REGISTRATION_DATE1}}
+{{SST_NEW_REGISTRATION_DATE1}}
 </td>
 
 <td class="right">
-{{NEW_REGISTRATION_DATE2}}
+{{SST_NEW_REGISTRATION_DATE2}}
 </td>
 
 <td class="right">
-{{NEW_REGISTRATION_TOTAL}}
+{{SST_NEW_REGISTRATION_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -326,20 +326,18 @@ Renewal
 </td>
 
 <td class="right">
-{{RENEWAL_DATE1}}
+{{SST_RENEWAL_DATE1}}
 </td>
 
 <td class="right">
-{{RENEWAL_DATE2}}
+{{SST_RENEWAL_DATE2}}
 </td>
 
 <td class="right">
-{{RENEWAL_TOTAL}}
+{{SST_RENEWAL_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -348,20 +346,18 @@ Get First ID
 </td>
 
 <td class="right">
-{{GET_FIRST_ID_DATE1}}
+{{SST_GET_FIRST_ID_DATE1}}
 </td>
 
 <td class="right">
-{{GET_FIRST_ID_DATE2}}
+{{SST_GET_FIRST_ID_DATE2}}
 </td>
 
 <td class="right">
-{{GET_FIRST_ID_TOTAL}}
+{{SST_GET_FIRST_ID_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -370,20 +366,18 @@ Lost
 </td>
 
 <td class="right">
-{{LOST_DATE1}}
+{{SST_LOST_DATE1}}
 </td>
 
 <td class="right">
-{{LOST_DATE2}}
+{{SST_LOST_DATE2}}
 </td>
 
 <td class="right">
-{{LOST_TOTAL}}
+{{SST_LOST_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -392,20 +386,18 @@ Change of Particular
 </td>
 
 <td class="right">
-{{CHANGE_PARTICULAR_DATE1}}
+{{SST_CHANGE_OF_PARTICULAR_DATE1}}
 </td>
 
 <td class="right">
-{{CHANGE_PARTICULAR_DATE2}}
+{{SST_CHANGE_OF_PARTICULAR_DATE2}}
 </td>
 
 <td class="right">
-{{CHANGE_PARTICULAR_TOTAL}}
+{{SST_CHANGE_OF_PARTICULAR_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -414,20 +406,18 @@ BIOMETRIC CORRECTION
 </td>
 
 <td class="right">
-{{BIOMETRIC_DATE1}}
+{{SST_BIOMETRIC_CORRECTION_DATE1}}
 </td>
 
 <td class="right">
-{{BIOMETRIC_DATE2}}
+{{SST_BIOMETRIC_CORRECTION_DATE2}}
 </td>
 
 <td class="right">
-{{BIOMETRIC_TOTAL}}
+{{SST_BIOMETRIC_CORRECTION_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -436,20 +426,18 @@ ALIEN New Registration
 </td>
 
 <td class="right">
-{{ALIEN_DATE1}}
+{{SST_ALIEN_NEW_REGISTRATION_DATE1}}
 </td>
 
 <td class="right">
-{{ALIEN_DATE2}}
+{{SST_ALIEN_NEW_REGISTRATION_DATE2}}
 </td>
 
 <td class="right">
-{{ALIEN_TOTAL}}
+{{SST_ALIEN_NEW_REGISTRATION_TOTAL}}
 </td>
 
 </tr>
-
-
 
 <tr>
 
@@ -458,41 +446,33 @@ CRVS_NEW
 </td>
 
 <td class="right">
-{{CRVS_DATE1}}
+{{SST_CRVS_NEW_DATE1}}
 </td>
 
 <td class="right">
-{{CRVS_DATE2}}
+{{SST_CRVS_NEW_DATE2}}
 </td>
 
 <td class="right">
-{{CRVS_TOTAL}}
+{{SST_CRVS_NEW_TOTAL}}
 </td>
 
 </tr>
-
 
 </table>
 
 <div style="height:75px;line-height:75px;">&nbsp;</div>
-
 <!-- =====================================
      REPORT 3 : MA STATISTICS
 ===================================== -->
 
-
 <table class="report ma-report">
 
-
 <tr>
-
 <th colspan="3" class="title">
 MA Statistics
 </th>
-
 </tr>
-
-
 
 <tr class="header">
 
@@ -501,16 +481,14 @@ Date
 </td>
 
 <td>
-{{CURRENT_DATE}}
+{{MA_CURRENT_DATE}}
 </td>
 
 <td>
-{{PREVIOUS_DATE}}
+{{MA_PREVIOUS_DATE}}
 </td>
 
 </tr>
-
-
 
 
 <tr>
@@ -520,16 +498,14 @@ Date
 </td>
 
 <td class="right large-number">
-{{TOTAL_TODAY}}
+{{MA_TOTAL_CURRENT}}
 </td>
 
 <td class="right large-number">
-{{TOTAL_YESTERDAY}}
+{{MA_TOTAL_PREVIOUS}}
 </td>
 
 </tr>
-
-
 
 
 <tr>
@@ -539,16 +515,14 @@ APPROVED
 </td>
 
 <td class="right">
-{{APPROVED_TODAY}}
+{{MA_APPROVED_CURRENT}}
 </td>
 
 <td class="right">
-{{APPROVED_YESTERDAY}}
+{{MA_APPROVED_PREVIOUS}}
 </td>
 
 </tr>
-
-
 
 
 <tr>
@@ -558,16 +532,14 @@ INQUEUE
 </td>
 
 <td class="right">
-{{INQUEUE_TODAY}}
+{{MA_INQUEUE_CURRENT}}
 </td>
 
 <td class="right">
-{{INQUEUE_YESTERDAY}}
+{{MA_INQUEUE_PREVIOUS}}
 </td>
 
 </tr>
-
-
 
 
 <tr>
@@ -577,20 +549,21 @@ REJECTED
 </td>
 
 <td class="right">
-{{REJECTED_TODAY}}
+{{MA_REJECTED_CURRENT}}
 </td>
 
 <td class="right">
-{{REJECTED_YESTERDAY}}
+{{MA_REJECTED_PREVIOUS}}
 </td>
 
 </tr>
 
 
-
 </table>
 
+
 <div style="height:75px;line-height:75px;">&nbsp;</div>
+
 
 <!-- =====================================
      REPORT 4 : ANALYSIS OF PROCESSED PACKETS
@@ -617,11 +590,11 @@ Date
 </td>
 
 <td>
-{{today}}
+{{APP_TODAY}}
 </td>
 
 <td>
-{{yesterday}}
+{{APP_YESTERDAY}}
 </td>
 
 <td>
@@ -632,27 +605,25 @@ Cumulative Total
 
 
 
-
 <tr>
 
-<td colspan="2" class="center">
+<td colspan="2" class="center no-wrap">
 Total Applications
 </td>
 
-<td class="right large-number">
-{{totalToday}}
+<td class="right large-number emph-value">
+{{APP_TOTAL_TODAY}}
 </td>
 
-<td class="right large-number">
-{{totalYesterday}}
+<td class="right large-number emph-value">
+{{APP_TOTAL_YESTERDAY}}
 </td>
 
-<td class="right large-number">
-{{totalCumulative}}
+<td class="right large-number emph-value">
+{{APP_TOTAL}}
 </td>
 
 </tr>
-
 
 
 
@@ -662,20 +633,24 @@ Total Applications
 OVER ALL
 </td>
 
+
 <td>
 PROCESSED
 </td>
 
-<td class="right">
-{{processedToday}}
+
+<td class="right emph-value">
+{{APP_PROCESSED_TODAY}}
 </td>
 
-<td class="right">
-{{processedYesterday}}
+
+<td class="right emph-value">
+{{APP_PROCESSED_YESTERDAY}}
 </td>
 
-<td class="right">
-{{processedTotal}}
+
+<td class="right emph-value">
+{{APP_PROCESSED_TOTAL}}
 </td>
 
 </tr>
@@ -688,12 +663,12 @@ PROCESSED
 ON_HOLD
 </td>
 
-<td class="right">
-{{holdToday}}
+<td class="right emph-value">
+{{APP_ON_HOLD_TODAY}}
 </td>
 
-<td class="right">
-{{holdYesterday}}
+<td class="right emph-value">
+{{APP_ON_HOLD_YESTERDAY}}
 </td>
 
 <td></td>
@@ -708,16 +683,16 @@ ON_HOLD
 MA INQUEUE
 </td>
 
-<td class="right">
-{{maQueueToday}}
+<td class="right emph-value">
+{{APP_MA_INQUEUE_TODAY}}
 </td>
 
-<td class="right">
-{{maQueueYesterday}}
+<td class="right emph-value">
+{{APP_MA_INQUEUE_YESTERDAY}}
 </td>
 
-<td class="right">
-{{maQueueTotal}}
+<td class="right emph-value">
+{{APP_MA_INQUEUE_TOTAL}}
 </td>
 
 </tr>
@@ -730,16 +705,16 @@ MA INQUEUE
 MVS INQUEUE
 </td>
 
-<td class="right">
-{{mvsQueueToday}}
+<td class="right emph-value">
+{{APP_MVS_INQUEUE_TODAY}}
 </td>
 
-<td class="right">
-{{mvsQueueYesterday}}
+<td class="right emph-value">
+{{APP_MVS_INQUEUE_YESTERDAY}}
 </td>
 
-<td class="right">
-{{mvsQueueTotal}}
+<td class="right emph-value">
+{{APP_MVS_INQUEUE_TOTAL}}
 </td>
 
 </tr>
@@ -752,18 +727,17 @@ MVS INQUEUE
 FAILED
 </td>
 
-<td class="right">
-{{failedToday}}
+<td class="right emph-value">
+{{APP_FAILED_TODAY}}
 </td>
 
-<td class="right">
-{{failedYesterday}}
+<td class="right emph-value">
+{{APP_FAILED_YESTERDAY}}
 </td>
 
 <td></td>
 
 </tr>
-
 
 
 
@@ -775,18 +749,19 @@ Migration PROCESSED
 </td>
 
 <td class="right">
-{{migrationToday}}
+{{APP_MIGRATION_TODAY}}
 </td>
 
 <td class="right">
-{{migrationYesterday}}
+{{APP_MIGRATION_YESTERDAY}}
 </td>
 
 <td class="right">
-{{migrationTotal}}
+{{APP_MIGRATION_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -797,18 +772,19 @@ Renewal PROCESSED
 </td>
 
 <td class="right">
-{{renewalToday}}
+{{APP_RENEWAL_TODAY}}
 </td>
 
 <td class="right">
-{{renewalYesterday}}
+{{APP_RENEWAL_YESTERDAY}}
 </td>
 
 <td class="right">
-{{renewalTotal}}
+{{APP_RENEWAL_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -819,18 +795,19 @@ New PROCESSED
 </td>
 
 <td class="right">
-{{newToday}}
+{{APP_NEW_TODAY}}
 </td>
 
 <td class="right">
-{{newYesterday}}
+{{APP_NEW_YESTERDAY}}
 </td>
 
 <td class="right">
-{{newTotal}}
+{{APP_NEW_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -841,18 +818,19 @@ COP PROCESSED
 </td>
 
 <td class="right">
-{{copToday}}
+{{APP_COP_TODAY}}
 </td>
 
 <td class="right">
-{{copYesterday}}
+{{APP_COP_YESTERDAY}}
 </td>
 
 <td class="right">
-{{copTotal}}
+{{APP_COP_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -863,18 +841,19 @@ LOST PROCESSED
 </td>
 
 <td class="right">
-{{lostToday}}
+{{APP_LOST_TODAY}}
 </td>
 
 <td class="right">
-{{lostYesterday}}
+{{APP_LOST_YESTERDAY}}
 </td>
 
 <td class="right">
-{{lostTotal}}
+{{APP_LOST_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -885,18 +864,19 @@ FIRSTID PROCESSED
 </td>
 
 <td class="right">
-{{firstToday}}
+{{APP_FIRST_ID_TODAY}}
 </td>
 
 <td class="right">
-{{firstYesterday}}
+{{APP_FIRST_ID_YESTERDAY}}
 </td>
 
 <td class="right">
-{{firstTotal}}
+{{APP_FIRST_ID_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -907,18 +887,19 @@ BIOMETRIC_CORRECTION PROCESSED
 </td>
 
 <td class="right">
-{{bioToday}}
+{{APP_BIOMETRIC_CORRECTION_TODAY}}
 </td>
 
 <td class="right">
-{{bioYesterday}}
+{{APP_BIOMETRIC_CORRECTION_YESTERDAY}}
 </td>
 
 <td class="right">
-{{bioTotal}}
+{{APP_BIOMETRIC_CORRECTION_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -929,18 +910,19 @@ ALIEN NEW PROCESSED
 </td>
 
 <td class="right">
-{{alienToday}}
+{{APP_ALIEN_NEW_TODAY}}
 </td>
 
 <td class="right">
-{{alienYesterday}}
+{{APP_ALIEN_NEW_YESTERDAY}}
 </td>
 
 <td class="right">
-{{alienTotal}}
+{{APP_ALIEN_NEW_TOTAL}}
 </td>
 
 </tr>
+
 
 
 
@@ -951,15 +933,15 @@ CRVS_NEW PROCESSED
 </td>
 
 <td class="right">
-{{crvsToday}}
+{{APP_CRVS_NEW_TODAY}}
 </td>
 
 <td class="right">
-{{crvsYesterday}}
+{{APP_CRVS_NEW_YESTERDAY}}
 </td>
 
 <td class="right">
-{{crvsTotal}}
+{{APP_CRVS_NEW_TOTAL}}
 </td>
 
 </tr>
@@ -967,8 +949,8 @@ CRVS_NEW PROCESSED
 
 </table>
 
-<div style="height:75px;line-height:75px;">&nbsp;</div>
 
+<div style="height:75px;line-height:75px;">&nbsp;</div>
 <!-- =====================================
      REPORT 5 : PRINTING
 ===================================== -->
@@ -995,11 +977,11 @@ Date
 </td>
 
 <td>
-{{today}}
+{{PRT_TODAY}}
 </td>
 
 <td>
-{{yesterday}}
+{{PRT_YESTERDAY}}
 </td>
 
 <td>
@@ -1022,15 +1004,15 @@ Sent to perso
 </td>
 
 <td class="right">
-{{printingToday}}
+{{PRT_SENT_TO_PERSO_TODAY}}
 </td>
 
 <td class="right">
-{{printingYesterday}}
+{{PRT_SENT_TO_PERSO_YESTERDAY}}
 </td>
 
 <td class="right">
-{{printingTotal}}
+{{PRT_SENT_TO_PERSO_TOTAL}}
 </td>
 
 </tr>
@@ -1038,14 +1020,17 @@ Sent to perso
 
 </table>
 
+
 <div style="height:75px;line-height:75px;">&nbsp;</div>
+
+
 
 <!-- =====================================
      REPORT 6 : STORED IN IDA
 ===================================== -->
 
 
-<table class="report">
+<table class="report ida-report">
 
 
 <tr>
@@ -1065,11 +1050,11 @@ Date
 </td>
 
 <td>
-{{date1}}
+{{IDA_DATE1}}
 </td>
 
 <td>
-{{date2}}
+{{IDA_DATE2}}
 </td>
 
 <td>
@@ -1092,15 +1077,15 @@ Stored
 </td>
 
 <td class="right">
-{{storedDate1}}
+{{IDA_STORED_DATE1}}
 </td>
 
 <td class="right">
-{{storedDate2}}
+{{IDA_STORED_DATE2}}
 </td>
 
 <td class="right">
-{{cumulativeTotal}}
+{{IDA_STORED_TOTAL}}
 </td>
 
 </tr>
