@@ -4,8 +4,10 @@ import io.mosip.packet_utility.service.PacketService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -88,5 +90,11 @@ public class PacketController {
             }
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
+
+    @PostMapping(value = "/residenceDetails", consumes = "multipart/form-data")
+    public ResponseEntity<String> getResidenceDetails(@RequestParam("file") MultipartFile file) throws Exception {
+        packetService.getResidenceDetails(file);
+        return ResponseEntity.ok("Residence details report generated: residence_details_report.csv");
     }
 }
