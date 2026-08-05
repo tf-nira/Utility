@@ -1,6 +1,7 @@
 package io.mosip.packet_utility.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public interface PacketService {
@@ -11,4 +12,5 @@ public interface PacketService {
     public void getResidenceStatus() throws  Exception;
     public void getAge() throws  Exception;
     public void getPrn() throws  Exception;
+    public void getResidenceDetails(MultipartFile file) throws Exception;
 }

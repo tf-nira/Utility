@@ -24,9 +24,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -60,6 +63,9 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
+
+    @Value("${io.moisp.packet.manager.search.multi.fields.url}")
+    private String searchMultiFieldsUrl;
 
     @Value("${io.moisp.packet.manager.metaInfo}")
     private String metainfo;
@@ -755,6 +761,97 @@ public class PacketServiceImpl implements PacketService {
 
         System.out.println("Residence status status check completed successfully");
 
+    }
+
+    @Override
+    public void getResidenceDetails(MultipartFile file) throws Exception {
+        List<String> rids = new ArrayList<>();
+        try (Reader reader = new InputStreamReader(file.getInputStream()); CSVReader csvReader = new CSVReader(reader)) {
+            String[] line;
+            while ((line = csvReader.readNext()) != null) {
+                if (line.length == 0 || !StringUtils.isNotEmpty(line[0])) {
+                    continue;
+                }
+                String rid = line[0].trim();
+                if (!"RID".equalsIgnoreCase(rid)) {
+                    rids.add(rid);
+                }
+            }
+        }
+
+        Path outputPath = Paths.get(filepath, "residence_details_report.csv");
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"RID", "applicantPlaceOfResidenceDistrict",
+                    "applicantPlaceOfResidenceCounty", "applicantPlaceOfResidenceSubCounty",
+                    "applicantPlaceOfResidenceParish", "applicantPlaceOfOriginVillage", "residenceStatus"});
+            for (String rid : rids) {
+                String[] details = getResidenceDetails(rid);
+                csvWriter.writeNext(new String[]{excelSafe(rid), details[0], details[1], details[2], details[3], details[4], details[5]});
+            }
+            csvWriter.flush();
+        }
+        System.out.println("Residence details report written to " + outputPath.toAbsolutePath());
+    }
+
+    private String[] getResidenceDetails(String rid) {
+        String[] values = new String[]{"", "", "", "", "", ""};
+        String[] fields = new String[]{"applicantPlaceOfResidenceDistrict", "applicantPlaceOfResidenceCounty",
+                "applicantPlaceOfResidenceSubCounty", "applicantPlaceOfResidenceParish",
+                "applicantPlaceOfOriginVillage", "residenceStatus"};
+
+        MultiFieldRequestDTO requestDTO = new MultiFieldRequestDTO();
+        requestDTO.setId(rid);
+        requestDTO.setFields(fields);
+        requestDTO.setSource(null);
+        requestDTO.setProcess(process);
+        requestDTO.setBypassCache(true);
+
+        RequestWrapper<MultiFieldRequestDTO> request = new RequestWrapper<>();
+        request.setRequest(requestDTO);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        try {
+            ResponseEntity<ResponseWrapper<FieldResponseDTO>> responseEntity = restTemplate.exchange(
+                    UriComponentsBuilder.fromHttpUrl(searchMultiFieldsUrl).build().toUri(), HttpMethod.POST,
+                    new HttpEntity<>(request, headers), new ParameterizedTypeReference<ResponseWrapper<FieldResponseDTO>>() {});
+            ResponseWrapper<FieldResponseDTO> response = responseEntity.getBody();
+            if (response == null || response.getResponse() == null || response.getResponse().getFields() == null) {
+                return values;
+            }
+            for (int i = 0; i < fields.length; i++) {
+                String value = response.getResponse().getFields().get(fields[i]);
+                values[i] = extractLocalizedValue(value);
+            }
+        } catch (RestClientException e) {
+            System.err.println("Exception fetching residence details for RID " + rid + ": " + e.getMessage());
+        }
+        return values;
+    }
+
+    private String extractLocalizedValue(String rawValue) {
+        if (rawValue == null || rawValue.isEmpty()) {
+            return "";
+        }
+        try {
+            JsonNode node = objectMapper.readTree(rawValue);
+            if (node.isArray() && node.size() > 0) {
+                for (JsonNode item : node) {
+                    if (item.has("value")) {
+                        return item.get("value").asText();
+                    }
+                }
+            }
+            return rawValue;
+        } catch (Exception e) {
+            // Not JSON, e.g. a plain string field - return as-is
+            return rawValue;
+        }
+    }
+
+    private String excelSafe(String value) {
+        return "=\"" + value + "\"";
     }
 
     public RidNinStatusDTO getResidence(String rid) {
