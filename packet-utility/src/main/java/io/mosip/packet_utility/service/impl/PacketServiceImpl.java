@@ -4,9 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.opencsv.CSVReader;
-import com.opencsv.CSVReaderBuilder;
-import com.opencsv.CSVWriter;
+import com.opencsv.*;
 import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.opencsv.exceptions.CsvValidationException;
 import io.mosip.biometrics.util.ConvertRequestDto;
@@ -22,6 +20,8 @@ import io.mosip.packet_utility.service.CbeffUtil;
 import io.mosip.packet_utility.service.PacketService;
 
 import javax.imageio.ImageIO;
+
+import org.springframework.web.client.HttpServerErrorException;
 import org.w3c.dom.*;
 
 import java.awt.image.BufferedImage;
@@ -73,6 +73,12 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.moisp.packet.manager.search.fields.url}")
     private String searchFieldUrl;
 
+    @Value("${io.moisp.packet.manager.search.fieldss.url}")
+    private String searchFieldsUrl;
+
+    @Value("${input.csv.path}")
+    private String inputCsvPath;
+
     @Value("${io.moisp.packet.manager.search.metainfo.url}")
     private String metaInfoUrl;
 
@@ -87,6 +93,12 @@ public class PacketServiceImpl implements PacketService {
     
     @Value("${io.mosip.packet.manager.get.biomterics.url}")
     private String getBiometricsUrl;
+
+    private static final List<String> FIELDS_TO_COMPARE =
+            Arrays.asList("givenName", "surname", "otherNames", "gender", "dateOfBirth");
+
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 1500;
 
 
     private final Executor executor = Executors.newFixedThreadPool(200);
@@ -285,6 +297,320 @@ public void getNINStatus() throws Exception {
 
     System.out.println("NIN status check completed successfully");
 }
+
+
+    @Override
+    public void comparePacketToRepo() throws Exception {
+
+        List<NinRidDTO> ninRidList = readNinRidsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<NinRidDTO>> batches = createBatchess(ninRidList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "nin_status_report.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath);
+             CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            csvWriter.writeNext(new String[] { "NIN", "RID", "STATUS" });
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninRidList.size() + " records in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<NinRidDTO> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size()
+                        + " with " + batch.size() + " records");
+
+                List<CompletableFuture<NinStatusDTO>> futures = batch.stream()
+                        .map(ninRid -> CompletableFuture
+                                .supplyAsync(() -> comparepacketagainstrepo(ninRid), executor)
+                                .handle((ninStatusDTO, throwable) -> {
+                                    if (throwable != null) {
+                                        System.err.println("Error checking NIN " + ninRid.getNin()
+                                                + " RID " + ninRid.getRid() + ": " + throwable.getMessage());
+                                        NinStatusDTO errorDto = new NinStatusDTO();
+                                        errorDto.setNin(ninRid.getNin());
+                                        errorDto.setRid(ninRid.getRid());
+                                        errorDto.setStatus("ERROR: " + throwable.getMessage());
+                                        return errorDto;
+                                    }
+                                    return ninStatusDTO;
+                                }))
+                        .collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf =
+                        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    for (CompletableFuture<NinStatusDTO> future : futures) {
+                        NinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[] { result.getNin(), result.getRid(), result.getStatus() });
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("NIN status check completed successfully");
+    }
+
+//    private List<NinRidDTO> readNinRidsFromCSV(boolean hasHeader) throws Exception {
+//        List<NinRidDTO> list = new ArrayList<>();
+//
+//        Resource resource = new ClassPathResource(inputCsvPath);
+//
+//        try (InputStream is = resource.getInputStream();
+//             Reader fileReader = new InputStreamReader(is, StandardCharsets.UTF_8);
+//             CSVReader reader = new CSVReader(fileReader)) {
+//
+//            String[] line;
+//            boolean first = true;
+//            while ((line = reader.readNext()) != null) {
+//                if (first) {
+//                    first = false;
+//                    if (hasHeader) continue;
+//                }
+//
+//                String nin = line[0] == null ? "" : line[0].trim();
+//                String rid = line[1] == null ? "" : line[1].trim();
+//
+//                if (nin.isEmpty() || rid.isEmpty()) continue;
+//                list.add(new NinRidDTO(nin, rid));
+//            }
+//        }
+//        return list;
+//    }
+
+    private List<NinRidDTO> readNinRidsFromCSV(boolean hasHeader) throws Exception {
+        List<NinRidDTO> list = new ArrayList<>();
+
+        Resource resource = new ClassPathResource(inputCsvPath);
+
+        CSVParser parser = new CSVParserBuilder()
+                .withSeparator('\t')   // tab-delimited
+                .build();
+
+        try (InputStream is = resource.getInputStream();
+             Reader fileReader = new InputStreamReader(is, StandardCharsets.UTF_8);
+             CSVReader reader = new CSVReaderBuilder(fileReader)
+                     .withCSVParser(parser)
+                     .build()) {
+
+            String[] line;
+            boolean first = true;
+            while ((line = reader.readNext()) != null) {
+                if (first) {
+                    first = false;
+                    if (hasHeader) continue;
+                }
+                if (line.length < 2) continue;
+
+                String nin = line[0] == null ? "" : line[0].trim();
+                String rid = line[1] == null ? "" : line[1].trim();
+
+                if (nin.isEmpty() || rid.isEmpty()) continue;
+                list.add(new NinRidDTO(nin, rid));
+            }
+        }
+        return list;
+    }
+
+    private <T> List<List<T>> createBatchess(List<T> items, int batchSize) {
+        List<List<T>> batches = new ArrayList<>();
+        for (int i = 0; i < items.size(); i += batchSize) {
+            batches.add(items.subList(i, Math.min(i + batchSize, items.size())));
+        }
+        return batches;
+    }
+
+
+    private NinStatusDTO comparepacketagainstrepo(NinRidDTO ninRid) {
+        String nin = ninRid.getNin();
+        String rid = ninRid.getRid();
+
+        NinStatusDTO result = new NinStatusDTO();
+        result.setNin(nin);
+        result.setRid(rid);
+
+        try {
+            Map<String, String> idRepoValues = callWithRetry(
+                    () -> fetchIdRepoValues(nin), "idRepo NIN " + nin);
+            Map<String, String> searchFieldValues = callWithRetry(
+                    () -> fetchSearchFieldValues(rid), "searchField RID " + rid);
+
+            boolean allMatch = true;
+            boolean anyCompared = false;
+
+            for (String field : FIELDS_TO_COMPARE) {
+                String searchVal = searchFieldValues.get(field);
+
+                if (searchVal == null) {
+                    continue;
+                }
+
+                anyCompared = true;
+                String idRepoVal = idRepoValues.get(field);
+                String idRepoNormalized = idRepoVal == null ? "" : idRepoVal.trim().toLowerCase();
+                String searchNormalized = searchVal.trim().toLowerCase();
+
+                if (!idRepoNormalized.equals(searchNormalized)) {
+                    allMatch = false;
+                }
+            }
+
+            if (!anyCompared) {
+                result.setStatus("NO_FIELDS_TO_COMPARE");
+            } else {
+                result.setStatus(allMatch ? "MATCH" : "NOT MATCH");
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error comparing NIN " + nin + " RID " + rid + ": " + e.getMessage());
+            result.setStatus("ERROR: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    private Map<String, String> fetchIdRepoValues(String nin) throws Exception {
+
+        String handle = nin.toLowerCase() + "@nin";
+        String url = idRepoUrl + handle;
+
+        UriComponentsBuilder builder =
+                UriComponentsBuilder.fromHttpUrl(url)
+                        .queryParam("type", "demo")
+                        .queryParam("idType", "handle");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        ResponseEntity<String> responseEntity = restTemplate.exchange(
+                builder.build().toUri(), HttpMethod.GET, entity, String.class);
+
+        JsonNode root = objectMapper.readTree(responseEntity.getBody());
+        JsonNode identity = root.path("response").path("identity");
+
+        Map<String, String> values = new HashMap<>();
+        for (String field : FIELDS_TO_COMPARE) {
+            values.put(field, extractValueFromLangValueArray(identity.path(field)));
+        }
+        return values;
+    }
+
+    private Map<String, String> fetchSearchFieldValues(String rid) throws Exception {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(searchFieldsUrl);
+
+        Map<String, Object> requestInner = new LinkedHashMap<>();
+        requestInner.put("id", rid);
+        requestInner.put("fields", FIELDS_TO_COMPARE);
+        requestInner.put("source", "REGISTRATION_CLIENT");
+        requestInner.put("process", "UPDATE");
+        requestInner.put("bypassCache", true);
+
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("id", "string");
+        requestBody.put("version", "string");
+        requestBody.put("requesttime", Instant.now().toString());
+        requestBody.put("metadata", new LinkedHashMap<>());
+        requestBody.put("request", requestInner);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+
+        ResponseEntity<String> responseEntity = restTemplate.exchange(
+                builder.build().toUri(), HttpMethod.POST, entity, String.class);
+
+        JsonNode root = objectMapper.readTree(responseEntity.getBody());
+        JsonNode fields = root.path("response").path("fields");
+
+        Map<String, String> values = new HashMap<>();
+        for (String field : FIELDS_TO_COMPARE) {
+            values.put(field, extractValueFromStringifiedLangValueArray(fields.path(field)));
+        }
+        return values;
+    }
+
+    private String extractValueFromLangValueArray(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                JsonNode valueNode = item.path("value");
+                if (!valueNode.isMissingNode() && !valueNode.isNull()) {
+                    String val = valueNode.asText();
+                    if (val != null && !val.trim().isEmpty()) {
+                        return val.trim().toLowerCase();
+                    }
+                }
+            }
+            return null;
+        }
+        String text = node.asText(null);
+        return (text == null || text.trim().isEmpty()) ? null : text.trim().toLowerCase();
+    }
+
+    private String extractValueFromStringifiedLangValueArray(JsonNode fieldNode) {
+        if (fieldNode == null || fieldNode.isMissingNode() || fieldNode.isNull()) {
+            return null;
+        }
+        String rawString = fieldNode.asText(null);
+        if (rawString == null || rawString.trim().isEmpty()) {
+            return null;
+        }
+
+        String trimmed = rawString.trim();
+
+
+        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+            try {
+                JsonNode parsed = objectMapper.readTree(trimmed);
+                return extractValueFromLangValueArray(parsed);
+            } catch (Exception e) {
+
+                System.err.println("Failed to parse field as JSON, using raw value instead: " + trimmed);
+            }
+        }
+
+
+        return trimmed.toLowerCase();
+    }
+
+    private <T> T callWithRetry(Callable<T> apiCall, String context) throws Exception {
+        int attempt = 0;
+        while (true) {
+            try {
+                return apiCall.call();
+            } catch (HttpServerErrorException e) {
+                attempt++;
+                if (attempt >= MAX_RETRIES) {
+                    throw e;
+                }
+                System.err.println("Retry " + attempt + "/" + MAX_RETRIES + " for " + context
+                        + " after error: " + e.getStatusCode());
+                Thread.sleep(RETRY_DELAY_MS * attempt); // simple backoff
+            }
+        }
+    }
 
     @Override
     public void updateCardDetails() throws Exception {
@@ -1050,12 +1376,12 @@ public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
                 return ninStatusDTO;
             }
 
-            ninStatusDTO.setIdSchemaVersion(idSchemaVersion);
-            ninStatusDTO.setUin(uin);
-            ninStatusDTO.setNin(retrievedNin);
-            ninStatusDTO.setCardNumber(cardNumber);
-            ninStatusDTO.setDateOfIssuance(dateOfIssuance);
-            ninStatusDTO.setDateOfExpiry(dateOfExpiry);
+//            ninStatusDTO.setIdSchemaVersion(idSchemaVersion);
+//            ninStatusDTO.setUin(uin);
+//            ninStatusDTO.setNin(retrievedNin);
+//            ninStatusDTO.setCardNumber(cardNumber);
+//            ninStatusDTO.setDateOfIssuance(dateOfIssuance);
+//            ninStatusDTO.setDateOfExpiry(dateOfExpiry);
 
             writeCsvRow(rid, idSchemaVersion, uin, retrievedNin, "RETRIEVED_SUCCESS", null,
                     cardNumber, dateOfIssuance, dateOfExpiry);

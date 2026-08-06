@@ -82,6 +82,20 @@ public class PacketController {
 
     }
 
+
+    @GetMapping("/comparePacketToRepo")
+    public ResponseEntity<String> comparePacketToRepo() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.comparePacketToRepo();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+
+    }
+
     @GetMapping("/updateDetails")
     public ResponseEntity<String> updateDetails() throws Exception {
         CompletableFuture.runAsync(() -> {
