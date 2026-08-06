@@ -10,6 +10,7 @@ public interface PacketService {
     public void getPacketNIN () throws Exception;
     public void getPacketCentreAndOperator () throws Exception;
     public void getNINStatus () throws Exception;
+    public void updateCardDetails () throws Exception;
     public void updateIdentity () throws  Exception;
     public String getDetailsFromIdRepo(String rid);
     public String getDetailsFromPacketManager(String rid);

@@ -287,6 +287,65 @@ public void getNINStatus() throws Exception {
 }
 
     @Override
+    public void updateCardDetails() throws Exception {
+        List<String> ninList = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(ninList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "nin_status_report.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            csvWriter.writeNext(new String[] { "NIN", "STATUS" });
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println("Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " NIMs");
+
+                List<CompletableFuture<NinStatusDTO>> futures = batch.stream().map(nin -> CompletableFuture
+                        .supplyAsync(() -> checkNINExistsAsyncForCard(nin, filepath), executor) // ✅ pass filepath
+                        .handle((ninStatusDTO, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking NIN " + nin + ": " + throwable.getMessage());
+                            }
+                            return ninStatusDTO;
+                        })).collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    for (CompletableFuture<NinStatusDTO> future : futures) {
+                        NinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[] { result.getNin(), result.getStatus() });
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("NIN status check completed successfully");
+    }
+
+    @Override
     public void updateIdentity() throws  Exception {
         List<List<String>> ninList = readMultiFieldCSV();
 
@@ -449,7 +508,7 @@ public void getNINStatus() throws Exception {
             otherNamesValue.setValue(updateDetailsInfo.get(3));
             identity.setOtherNames(Collections.singletonList(otherNamesValue));
         }
-       
+
 
         if (isNotBlank(updateDetailsInfo.get(4))) {
             LocalizedValue genderValue = new LocalizedValue();
@@ -470,7 +529,7 @@ public void getNINStatus() throws Exception {
         updateRequestDto.setId("mosip.id.update");
         updateRequestDto.setVersion("v1.0");
         updateRequestDto.setRequesttime(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
-        updateRequestDto.setRequest(requestData);
+        updateRequestDto.setRequest((Map<String, Object>) requestData);
 
         return updateRequestDto;
     }
@@ -656,7 +715,6 @@ public void getNINStatus() throws Exception {
             throw new RuntimeException(e);
         }
     }
-
 
 public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
 
@@ -909,6 +967,230 @@ public NinStatusDTO checkNINExistsAsync(String nin, String baseOutputPath) {
         }
         return "";
     }
+
+    public NinStatusDTO checkNINExistsAsyncForCard(String rid, String baseOutputPath) {
+
+        NinStatusDTO ninStatusDTO = new NinStatusDTO();
+        ninStatusDTO.setNin(rid);
+
+        String url = idRepoUrl + rid;
+
+        UriComponentsBuilder builder =
+                UriComponentsBuilder.fromHttpUrl(url)
+                        .queryParam("type", "demo");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity =
+                    restTemplate.exchange(
+                            builder.build().toUri(),
+                            HttpMethod.GET,
+                            entity,
+                            new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {});
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper != null &&
+                    responseWrapper.getErrors() != null &&
+                    !responseWrapper.getErrors().isEmpty()) {
+                System.out.println("Record not found for input: " + rid);
+                ninStatusDTO.setStatus("NOT_FOUND");
+                writeCsvRow(rid, null, null, null, "RETRIEVE_FAILED", null, null, null, null);
+                return ninStatusDTO;
+            }
+
+            if (responseWrapper == null || responseWrapper.getResponse() == null) {
+                ninStatusDTO.setStatus("NO_RESPONSE");
+                writeCsvRow(rid, null, null, null, "RETRIEVE_FAILED", null, null, null, null);
+                return ninStatusDTO;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> identity = (Map<String, Object>) responseWrapper.getResponse().getIdentity();
+
+            String idSchemaVersion = null;
+            String uin = null;
+            String retrievedNin = null;
+
+            if (identity != null) {
+                Object idSchemaVal = identity.get("IDSchemaVersion");
+                Object uinVal = identity.get("UIN");
+                Object ninVal = identity.get("NIN");
+
+                idSchemaVersion = idSchemaVal != null ? idSchemaVal.toString() : null;
+                uin = uinVal != null ? uinVal.toString() : null;
+                retrievedNin = ninVal != null ? ninVal.toString() : null;
+            }
+
+            String cardNumber = null;
+            String dateOfIssuance = null;
+            String dateOfExpiry = null;
+
+            List<Object> cardDetailsRaw = responseWrapper.getResponse().getCardDetails();
+            if (cardDetailsRaw != null && !cardDetailsRaw.isEmpty()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> cardDetail = (Map<String, Object>) cardDetailsRaw.get(0);
+
+                Object cardNumberVal = cardDetail.get("cardNumber");
+                Object issuanceVal = cardDetail.get("dateOfIssuance");
+                Object expiryVal = cardDetail.get("dateOfExpiry");
+
+                cardNumber = cardNumberVal != null ? cardNumberVal.toString() : null;
+                dateOfIssuance = issuanceVal != null ? issuanceVal.toString() : null;
+                dateOfExpiry = expiryVal != null ? expiryVal.toString() : null;
+            }
+
+            if (retrievedNin == null || uin == null || idSchemaVersion == null) {
+                ninStatusDTO.setStatus("REQUIRED_FIELDS_NOT_FOUND_IN_IDENTITY");
+                writeCsvRow(rid, idSchemaVersion, uin, retrievedNin, "RETRIEVE_FAILED", null,
+                        cardNumber, dateOfIssuance, dateOfExpiry);
+                return ninStatusDTO;
+            }
+
+            ninStatusDTO.setIdSchemaVersion(idSchemaVersion);
+            ninStatusDTO.setUin(uin);
+            ninStatusDTO.setNin(retrievedNin);
+            ninStatusDTO.setCardNumber(cardNumber);
+            ninStatusDTO.setDateOfIssuance(dateOfIssuance);
+            ninStatusDTO.setDateOfExpiry(dateOfExpiry);
+
+            writeCsvRow(rid, idSchemaVersion, uin, retrievedNin, "RETRIEVED_SUCCESS", null,
+                    cardNumber, dateOfIssuance, dateOfExpiry);
+
+            List<String> updateDetailsInfo = new ArrayList<>();
+            updateDetailsInfo.add(retrievedNin);
+            updateDetailsInfo.add(uin);
+            updateDetailsInfo.add(idSchemaVersion);
+
+            NinStatusDTO updateResult = updateDetailss(updateDetailsInfo);
+
+            ninStatusDTO.setStatus("RETRIEVED_AND_UPDATED:" + updateResult.getStatus());
+
+
+            writeCsvRow(rid, idSchemaVersion, uin, retrievedNin,
+                    "UPDATED_SUCCESS", updateResult.getStatus(),
+                    cardNumber, dateOfIssuance, dateOfExpiry);
+
+        } catch (Exception e) {
+            System.err.println("Exception for input " + rid + ": " + e.getMessage());
+            ninStatusDTO.setStatus("ERROR");
+            writeCsvRow(rid, null, null, null, "ERROR: " + e.getMessage(), null, null, null, null);
+        }
+
+        return ninStatusDTO;
+    }
+
+    public NinStatusDTO updateDetailss(List<String> updateDetailsInfo) {
+        NinStatusDTO ninStatusDTO = new NinStatusDTO();
+        ninStatusDTO.setNin(updateDetailsInfo.get(0));
+
+        String url = updateIdentityUrl;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        UpdateRequestDTO updateRequestDTO = createUpdateRequestt(updateDetailsInfo);
+
+        HttpEntity<UpdateRequestDTO> entity = new HttpEntity<>(updateRequestDTO, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<UpdateResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.PATCH, entity, new ParameterizedTypeReference<ResponseWrapper<UpdateResponseDTO>>() {
+                    });
+
+            ResponseWrapper<UpdateResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper == null) {
+                ninStatusDTO.setStatus("NO_RESPONSE_FROM_UPDATE");
+                return ninStatusDTO;
+            }
+
+            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                System.out.println("NIN not updated in ID repo: " + updateDetailsInfo.get(0));
+                ninStatusDTO.setStatus(responseWrapper.getErrors().get(0).getMessage());
+                return ninStatusDTO;
+            }
+
+            if (responseWrapper.getResponse() == null) {
+                ninStatusDTO.setStatus("NO_RESPONSE_BODY");
+                return ninStatusDTO;
+            }
+
+            ninStatusDTO.setStatus(responseWrapper.getResponse().getStatus());
+            return ninStatusDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for NIN " + updateDetailsInfo.get(0) + ": " + e.getMessage());
+            ninStatusDTO.setStatus(e.getMessage());
+            return ninStatusDTO;
+        }
+    }
+
+    private UpdateRequestDTO createUpdateRequestt(List<String> updateDetailsInfo) {
+
+        String nin = updateDetailsInfo.get(0);
+        String uin = updateDetailsInfo.get(1);
+        String idSchemaVersionStr = updateDetailsInfo.get(2);
+
+        Map<String, Object> identity = new LinkedHashMap<>();
+        identity.put("IDSchemaVersion", Double.parseDouble(idSchemaVersionStr));
+        identity.put("UIN", uin);
+        identity.put("NIN", nin);
+        identity.put("isCardRequired", "Yes");
+
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("registrationId", generateUniqueRegistrationId());
+        request.put("identity", identity);
+
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setId("mosip.id.update");
+        dto.setVersion("v1.0");
+        dto.setRequesttime(Instant.now().toString());
+        dto.setRequest(request);
+
+        return dto;
+    }
+
+    private String generateUniqueRegistrationId() {
+        long timestamp = System.currentTimeMillis();
+        int randomSuffix = new Random().nextInt(900) + 100;
+        return String.valueOf(timestamp) + randomSuffix;
+    }
+
+    private void writeCsvRow(String rid, String idSchemaVersion, String uin,
+                             String retrievedNin, String retrievalStatus, String updateStatus,
+                             String cardNumber, String dateOfIssuance, String dateOfExpiry) {
+        String csvPath = "D:\\NIRA\\outputnew\\cardstatus.csv";
+        boolean fileExists = new File(csvPath).exists();
+
+        try (FileWriter fw = new FileWriter(csvPath, true);
+             BufferedWriter bw = new BufferedWriter(fw)) {
+
+            if (!fileExists) {
+                bw.write("RID,IDSchemaVersion,UIN,RetrievedNIN,RetrievalStatus,UpdateStatus,CardNumber,DateOfIssuance,DateOfExpiry\n");
+            }
+
+            bw.write(String.format("%s,%s,%s,%s,%s,%s,%s,%s,%s%n",
+                    rid,
+                    idSchemaVersion == null ? "" : idSchemaVersion,
+                    uin == null ? "" : uin,
+                    retrievedNin == null ? "" : retrievedNin,
+                    retrievalStatus == null ? "" : retrievalStatus,
+                    updateStatus == null ? "" : updateStatus,
+                    cardNumber == null ? "" : cardNumber,
+                    dateOfIssuance == null ? "" : dateOfIssuance,
+                    dateOfExpiry == null ? "" : dateOfExpiry));
+
+        } catch (IOException e) {
+            System.err.println("Failed to write CSV row for " + rid + ": " + e.getMessage());
+        }
+    }
+
+
 
     public NinStatusDTO updateDetails(List<String> updateDetailsInfo) {
         NinStatusDTO ninStatusDTO = new NinStatusDTO();
