@@ -537,7 +537,7 @@ public class PacketServiceImpl implements PacketService {
             identity.setGivenName(Collections.singletonList(givenNameValue));
         }
 
-        if (isNotBlank(updateDetailsInfo.get(4))) {
+        if (isNotBlank(updateDetailsInfo.get(4)) || !isNotBlank(updateDetailsInfo.get(4))) {
             LocalizedValue otherNamesValue = new LocalizedValue();
             otherNamesValue.setLanguage("eng");
             otherNamesValue.setValue(updateDetailsInfo.get(4));
