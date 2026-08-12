@@ -30,7 +30,7 @@ public class StatusEmailJob {
 
     @Scheduled(cron = "${mosip.send.status.cron.expression}")
     public void sendStatusReport () {
-       // registrationRepository.updateStatusCodes();
+       registrationRepository.updateStatusCodes();
         List<StatusCodeCountProjection> data = registrationRepository.getStatusCodeCount();
 
         Map<String, Long> newCount = data.stream()

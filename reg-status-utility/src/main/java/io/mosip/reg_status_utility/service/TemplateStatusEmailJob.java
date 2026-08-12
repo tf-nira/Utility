@@ -8,6 +8,8 @@ import io.mosip.reg_status_utility.repository.print.CardDetailRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.Resource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -46,8 +48,9 @@ public class TemplateStatusEmailJob {
     @Value("classpath:status mail html template.txt")
     private Resource statusMailTemplate;
 
-    @Value("classpath:recipients.txt")
-    private Resource recipientsResource;
+    @Value("#{'${recipient.emails.pvt}'.split(',')}")
+    private List<String> recipients;
+
 
     public TemplateStatusEmailJob(EmailService emailService) {
         this.emailService = emailService;
@@ -56,21 +59,6 @@ public class TemplateStatusEmailJob {
     @Scheduled(cron = "${mosip.template.status.email.cron.expression}")
     public void sendTemplateStatusEmail() {
         try {
-            // Read recipients from file at runtime (no restart needed)
-            String recipientsContent;
-            try (InputStream is = recipientsResource.getInputStream()) {
-                recipientsContent = new String(is.readAllBytes(), StandardCharsets.UTF_8).trim();
-            }
-            List<String> recipients = Arrays.stream(recipientsContent.split(","))
-                    .map(String::trim)
-                    .filter(email -> !email.isEmpty())
-                    .collect(Collectors.toList());
-
-            if (recipients.isEmpty()) {
-                log.warn("No recipients found in recipients.txt. Skipping email.");
-                return;
-            }
-
             // Read email body from template
             String emailBody;
             try (InputStream inputStream = statusMailTemplate.getInputStream()) {
@@ -90,6 +78,15 @@ public class TemplateStatusEmailJob {
         } catch (IOException e) {
             log.error("Unable to read the status email template or recipients file", e);
         }
+    }
+
+    /**
+     * Sends an initial status report whenever the application has started successfully.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void sendTemplateStatusEmailOnStartup() {
+        log.info("Sending template status email after application startup");
+        sendTemplateStatusEmail();
     }
 
     private String fmt(long number) {
