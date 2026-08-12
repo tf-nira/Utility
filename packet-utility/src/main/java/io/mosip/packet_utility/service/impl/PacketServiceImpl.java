@@ -86,6 +86,9 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.mosip.id.repo.update.identity.url}")
     private String updateIdentityUrl;
 
+    @Value("${io.moisp.packet.manager.document.url}")
+    private String documentUrl;
+
     @Value("${io.mosip.output.file.path}")
     private String filepath;
 
@@ -896,6 +899,19 @@ public class PacketServiceImpl implements PacketService {
 
     }
 
+    private boolean hasValue(ObjectNode json, String field) {
+        JsonNode node = json.get(field);
+
+        if (node == null || node.isNull() || !node.isArray() || node.size() == 0) {
+            return false;
+        }
+
+        JsonNode first = node.get(0);
+
+        return first.hasNonNull("value")
+                && !first.get("value").asText().trim().isEmpty();
+    }
+
     public RidNinStatusDTO getResidence(String rid) {
         RidNinStatusDTO ridNinStatusDTO = new RidNinStatusDTO();
         ridNinStatusDTO.setRid(rid);
@@ -926,9 +942,13 @@ public class PacketServiceImpl implements PacketService {
 
                 ridNinStatusDTO.setNin(identityJson.get("NIN").asText());
 
-                if (identityJson.hasNonNull("residenceStatus") &&
-                        !identityJson.get("residenceStatus").isEmpty()) {
-                    ridNinStatusDTO.setStatus("Residence status already present");
+                if (hasValue(identityJson, "residenceStatus")
+                        && hasValue(identityJson, "applicantPlaceOfResidenceCounty")
+                        && hasValue(identityJson, "applicantPlaceOfResidenceSubCounty")
+                        && hasValue(identityJson, "applicantPlaceOfResidenceParish")
+                        && hasValue(identityJson, "applicantPlaceOfResidenceVillage")) {
+
+                    ridNinStatusDTO.setStatus("need to update district");
                 }
                 else if (identityJson.hasNonNull("applicantForeignResidenceCountry") &&
                         !identityJson.get("applicantForeignResidenceCountry").isEmpty()) {
@@ -1675,6 +1695,184 @@ public class PacketServiceImpl implements PacketService {
         Path imageFile = outputDir.resolve(regId + "_" + recordProcess + "_face.png");
         ImageIO.write(image, "png", imageFile.toFile());
         return imageFile;
+    }
+
+    @Override
+    public void extractDocuments(String inputFile) throws Exception {
+        List<String[]> inputList = readRegProcessCSV(inputFile);
+
+        if (inputList.isEmpty()) {
+            System.out.println("No records found in " + inputFile + ". Exiting.");
+            return;
+        }
+
+        int batchSize = 25;
+        List<List<String[]>> batches = new ArrayList<>();
+        for (int i = 0; i < inputList.size(); i += batchSize) {
+            batches.add(inputList.subList(i, Math.min(i + batchSize, inputList.size())));
+        }
+
+        System.out.println("Processing " + inputList.size() + " records for document extraction in " + batches.size() + " batches");
+
+        for (int i = 0; i < batches.size(); i++) {
+            List<String[]> batch = batches.get(i);
+            System.out.println("Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " records");
+
+            List<CompletableFuture<Void>> futures = batch.stream()
+                    .map(record -> CompletableFuture.runAsync(() -> {
+                        try {
+                            extractAndSaveDocument(record[0], record[1]);
+                        } catch (Exception e) {
+                            System.err.println("Error processing reg_id: " + record[0] + " - " + e.getMessage());
+                        }
+                    }, executor))
+                    .collect(Collectors.toList());
+
+            CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+            try {
+                allOf.get(2, TimeUnit.MINUTES);
+                System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+            } catch (TimeoutException e) {
+                System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+            } catch (ExecutionException | InterruptedException e) {
+                System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+            }
+
+            Thread.sleep(1000);
+        }
+
+        System.out.println("Document extraction completed successfully");
+    }
+
+    private void extractAndSaveDocument(String regId, String process) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            DocumentRequestDTO documentRequest = new DocumentRequestDTO();
+            documentRequest.setId(regId);
+            documentRequest.setDocumentName("proofOfPhysicalApplicationForm");
+            documentRequest.setSource("MIGRATOR".equalsIgnoreCase(process) ? "DATAMIGRATOR" : source);
+            documentRequest.setProcess(process);
+            documentRequest.setBypassCache(true);
+
+            RequestWrapper<DocumentRequestDTO> wrapper = new RequestWrapper<>();
+            wrapper.setId("string");
+            wrapper.setVersion("string");
+            wrapper.setRequesttime(LocalDateTime.now(Clock.systemUTC()));
+            wrapper.setMetadata(new HashMap<>());
+            wrapper.setRequest(documentRequest);
+
+            HttpEntity<RequestWrapper<DocumentRequestDTO>> entity = new HttpEntity<>(wrapper, headers);
+
+            ResponseEntity<ResponseWrapper<DocumentResponseDTO>> responseEntity = restTemplate.exchange(
+                    documentUrl,
+                    HttpMethod.POST,
+                    entity,
+                    new ParameterizedTypeReference<ResponseWrapper<DocumentResponseDTO>>() {});
+
+            ResponseWrapper<DocumentResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper != null && responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                System.err.println("Error fetching document for reg_id: " + regId + " - " + responseWrapper.getErrors().get(0).getMessage());
+                return;
+            }
+
+            if (responseWrapper != null && responseWrapper.getResponse() != null) {
+                DocumentResponseDTO documentResponse = responseWrapper.getResponse();
+                String base64Document = documentResponse.getDocument();
+
+                if (base64Document != null && !base64Document.isEmpty()) {
+                    byte[] pdfBytes = Base64.getDecoder().decode(base64Document);
+
+                    // Create output folder named after reg_id
+                    Path outputDir = Paths.get(filepath, "documents", regId);
+                    Files.createDirectories(outputDir);
+
+                    // Save PDF file
+                    Path pdfPath = outputDir.resolve("document.pdf");
+                    Files.write(pdfPath, pdfBytes);
+
+                    System.out.println("Document saved for reg_id: " + regId + " at " + pdfPath.toAbsolutePath());
+                } else {
+                    System.err.println("Empty document content for reg_id: " + regId);
+                }
+            } else {
+                System.err.println("No response received for reg_id: " + regId);
+            }
+        } catch (Exception e) {
+            System.err.println("Exception while extracting document for reg_id: " + regId + " - " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void getFacilityDetails() throws Exception {
+        List<String> regIds = readNINsFromCSV(true);
+
+        Path outputPath = Paths.get(filepath, "facility_details.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"reg_id", "nin", "facilityType", "facilityTypeCategory", "facilityTypeSubCategory"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + regIds.size() + " RIDs for facility details");
+
+            for (String regId : regIds) {
+                String[] row = getFacilityDetailByRegId(regId);
+                csvWriter.writeNext(row);
+            }
+            csvWriter.flush();
+        }
+
+        System.out.println("Facility details saved to: " + outputPath.toAbsolutePath());
+    }
+
+    private String[] getFacilityDetailByRegId(String regId) {
+        String[] row = new String[]{regId, "", "", "", ""};
+
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+
+            if (idRepoResponse == null || idRepoResponse.getIdentity() == null) {
+                return row;
+            }
+
+            JsonNode identityJson = objectMapper.valueToTree(idRepoResponse.getIdentity());
+
+            if (identityJson.hasNonNull("NIN")) {
+                row[1] = identityJson.get("NIN").asText();
+            }
+
+            row[2] = extractLocalizedValue(identityJson, "facilityType");
+            row[3] = extractLocalizedValue(identityJson, "facilityTypeCategory");
+            row[4] = extractLocalizedValue(identityJson, "facilityTypeSubCategory");
+
+        } catch (Exception e) {
+            System.err.println("Exception while fetching facility details for regId " + regId + ": " + e.getMessage());
+        }
+
+        return row;
+    }
+
+    private String extractLocalizedValue(JsonNode identityJson, String fieldName) {
+        JsonNode field = identityJson.get(fieldName);
+        if (field == null || field.isNull() || field.size() == 0) {
+            return "";
+        }
+
+        if (field.isArray()) {
+            for (JsonNode item : field) {
+                if (item.hasNonNull("value")) {
+                    return item.get("value").asText();
+                }
+            }
+        } else if (field.hasNonNull("value")) {
+            return field.get("value").asText();
+        }
+
+        return "";
     }
 }
 

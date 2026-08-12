@@ -128,4 +128,30 @@ public class PacketController {
         });
         return ResponseEntity.ok("Applicant field search started. Check D:\\output\\applicant-fields.csv for the result.");
     }
+
+    @GetMapping("/extractDocuments")
+    public ResponseEntity<String> extractDocuments(
+            @RequestParam(defaultValue = "reg_process.csv") String inputFile) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.extractDocuments(inputFile);
+            } catch (Exception e) {
+                System.err.println("Error while extracting documents: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+        return ResponseEntity.ok("Document extraction started. Check D:\\output\\documents folder for the result.");
+    }
+
+    @GetMapping("/facilityDetails")
+    public ResponseEntity<String> getFacilityDetails() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getFacilityDetails();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
 }

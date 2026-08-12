@@ -14,4 +14,6 @@ public interface PacketService {
     public void extractFaceBiometrics() throws Exception;
     public void addOrUpdateMergedTag() throws Exception;
     public void searchApplicantFields(String inputFile) throws Exception;
+    public void extractDocuments(String inputFile) throws Exception;
+    public void getFacilityDetails() throws Exception;
 }
