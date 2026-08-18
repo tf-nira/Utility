@@ -354,9 +354,15 @@ public class TemplateStatusEmailJob {
             values.put("APP_FAILED_YESTERDAY", fmt(getCount(holdFailedYesterdayMap, "FAILED")));
 
             // ---- REPORT 5: PRINTING ----
-            values.put("PRT_SENT_TO_PERSO_TODAY", fmt(getSingleCount(r5d1)));
-            values.put("PRT_SENT_TO_PERSO_YESTERDAY", fmt(getSingleCount(r5d2)));
-            values.put("PRT_SENT_TO_PERSO_TOTAL", fmt(getSingleCount(r5t)));
+            Map<String, Long> printTodayMap = toMap(r5d1);
+            Map<String, Long> printYesterdayMap = toMap(r5d2);
+            Map<String, Long> printTotalMap = toMap(r5t);
+            values.put("PRT_ALIEN_TODAY", fmt(getCount(printTodayMap, "Alien")));
+            values.put("PRT_ALIEN_YESTERDAY", fmt(getCount(printYesterdayMap, "Alien")));
+            values.put("PRT_ALIEN_TOTAL", fmt(getCount(printTotalMap, "Alien")));
+            values.put("PRT_CITIZEN_TODAY", fmt(getCount(printTodayMap, "Citizen")));
+            values.put("PRT_CITIZEN_YESTERDAY", fmt(getCount(printYesterdayMap, "Citizen")));
+            values.put("PRT_CITIZEN_TOTAL", fmt(getCount(printTotalMap, "Citizen")));
 
             // ---- REPORT 6: STORED IN IDA ----
             values.put("IDA_DATE1", fmtDate(yesterday));

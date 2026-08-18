@@ -36,16 +36,16 @@ public interface RegistrationRepository extends JpaRepository<RegistrationEntity
     @Query(value = "SELECT r.status_code AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r GROUP BY r.status_code", nativeQuery = true)
     List<StatusCodeCountProjection> getStatusCodeCount ();
 
-    @Query(value = "SELECT COALESCE(r.applicant_type, r.process) AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r GROUP BY COALESCE(r.applicant_type, r.process)", nativeQuery = true)
+    @Query(value = "SELECT CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r GROUP BY CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END ORDER BY statusCode", nativeQuery = true)
     List<StatusCodeCountProjection> getProcessTypeCountCumulative ();
 
-    @Query(value = "SELECT COALESCE(r.applicant_type, r.process) AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.cr_dtimes LIKE :datePattern GROUP BY COALESCE(r.applicant_type, r.process)", nativeQuery = true)
+    @Query(value = "SELECT CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.cr_dtimes LIKE :datePattern GROUP BY CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END", nativeQuery = true)
     List<StatusCodeCountProjection> getProcessTypeCountByDate(@Param("datePattern") String datePattern);
 
-    @Query(value = "SELECT COALESCE(r.applicant_type, r.process) AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.status_code = 'PROCESSED' GROUP BY COALESCE(r.applicant_type, r.process)", nativeQuery = true)
+    @Query(value = "SELECT CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.status_code = 'PROCESSED' GROUP BY CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END", nativeQuery = true)
     List<StatusCodeCountProjection> getProcessedCountCumulative();
 
-    @Query(value = "SELECT COALESCE(r.applicant_type, r.process) AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.status_code = 'PROCESSED' AND r.upd_dtimes LIKE :datePattern GROUP BY COALESCE(r.applicant_type, r.process)", nativeQuery = true)
+    @Query(value = "SELECT CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END AS statusCode, COUNT(*) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.registration r WHERE r.status_code = 'PROCESSED' AND r.upd_dtimes LIKE :datePattern GROUP BY CASE WHEN r.reg_id LIKE '%-%' THEN 'CRVS_NEW' ELSE COALESCE(r.applicant_type, r.process) END", nativeQuery = true)
     List<StatusCodeCountProjection> getProcessedCountByDate(@Param("datePattern") String datePattern);
 
     @Query(value = "SELECT r.status_code AS statusCode, COUNT(DISTINCT r.reg_id) AS count, CURRENT_DATE AS currentDate, CURRENT_TIME AS currentTime FROM regprc.reg_manual_verification r WHERE r.cr_dtimes LIKE :datePattern AND r.status_code != 'PENDING' GROUP BY r.status_code", nativeQuery = true)

@@ -123,8 +123,27 @@ body {
 }
 
 .printing-report {
-    width:625px;
+    width: 625px;
+    table-layout: fixed;
 }
+
+.printing-report td:first-child {
+    width: 100px;
+}
+
+.printing-report td:nth-child(2) {
+    width: 100px;
+}
+
+.printing-report td:nth-child(3),
+.printing-report td:nth-child(4) {
+    width: 100px;
+}
+
+.printing-report td:nth-child(5) {
+    width: 225px;
+}
+
 
 .ida-report {
     width:625px;
@@ -951,77 +970,87 @@ CRVS_NEW PROCESSED
 
 
 <div style="height:75px;line-height:75px;">&nbsp;</div>
+
 <!-- =====================================
      REPORT 5 : PRINTING
 ===================================== -->
 
-
 <table class="report printing-report">
 
-
 <tr>
-
-<th colspan="5" class="title">
-Printing
-</th>
-
+    <th colspan="5" class="title">
+        Printing
+    </th>
 </tr>
-
-
-
 
 <tr class="header">
 
-<td colspan="2">
-Date
-</td>
+    <td colspan="2">
+        Date
+    </td>
 
-<td>
-{{PRT_TODAY}}
-</td>
+    <td>
+        {{PRT_TODAY}}
+    </td>
 
-<td>
-{{PRT_YESTERDAY}}
-</td>
+    <td>
+        {{PRT_YESTERDAY}}
+    </td>
 
-<td>
-Cumulative Total
-</td>
+    <td>
+        Cumulative Total
+    </td>
 
 </tr>
-
-
-
 
 <tr>
 
-<td>
-Printing
-</td>
+    <td rowspan="2" class="left">
+        Sent to perso
+    </td>
 
-<td>
-Sent to perso
-</td>
+    <td class="left">
+        Alien
+    </td>
 
-<td class="right">
-{{PRT_SENT_TO_PERSO_TODAY}}
-</td>
+    <td class="right">
+        {{PRT_ALIEN_TODAY}}
+    </td>
 
-<td class="right">
-{{PRT_SENT_TO_PERSO_YESTERDAY}}
-</td>
+    <td class="right">
+        {{PRT_ALIEN_YESTERDAY}}
+    </td>
 
-<td class="right">
-{{PRT_SENT_TO_PERSO_TOTAL}}
-</td>
+    <td class="right">
+        {{PRT_ALIEN_TOTAL}}
+    </td>
 
 </tr>
 
+<tr>
+
+    <td class="left">
+        Citizen
+    </td>
+
+    <td class="right">
+        {{PRT_CITIZEN_TODAY}}
+    </td>
+
+    <td class="right">
+        {{PRT_CITIZEN_YESTERDAY}}
+    </td>
+
+    <td class="right">
+        {{PRT_CITIZEN_TOTAL}}
+    </td>
+
+</tr>
 
 </table>
 
-
 <div style="height:75px;line-height:75px;">&nbsp;</div>
+
 
 
 

@@ -13,24 +13,26 @@ import java.util.List;
 public interface CardDetailRepository extends JpaRepository<CardDetailEntity, String> {
 
     @Query(value = "SELECT " +
-            "'PRINTED' AS statusCode, " +
+            "CASE WHEN nin LIKE 'A%' THEN 'Alien' ELSE 'Citizen' END AS statusCode, " +
             "COUNT(*) AS count, " +
             "CURRENT_DATE AS currentDate, " +
             "CURRENT_TIME AS currentTime " +
             "FROM print.card_detail " +
             "WHERE is_pushed = 'true' " +
-            "AND upd_dtimes LIKE ?1",
+            "AND upd_dtimes LIKE ?1 " +
+            "GROUP BY CASE WHEN nin LIKE 'A%' THEN 'Alien' ELSE 'Citizen' END",
             nativeQuery = true)
     List<StatusCodeCountProjection> getPrintingCountByDate(String datePattern);
 
 
     @Query(value = "SELECT " +
-            "'PRINTED' AS statusCode, " +
+            "CASE WHEN nin LIKE 'A%' THEN 'Alien' ELSE 'Citizen' END AS statusCode, " +
             "COUNT(*) AS count, " +
             "CURRENT_DATE AS currentDate, " +
             "CURRENT_TIME AS currentTime " +
             "FROM print.card_detail " +
-            "WHERE is_pushed = 'true'",
+            "WHERE is_pushed = 'true' " +
+            "GROUP BY CASE WHEN nin LIKE 'A%' THEN 'Alien' ELSE 'Citizen' END",
             nativeQuery = true)
     List<StatusCodeCountProjection> getPrintingCountTotal();
 
