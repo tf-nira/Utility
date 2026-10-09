@@ -1,5 +1,7 @@
 package io.mosip.packet_utility.controller;
 
+import io.mosip.packet_utility.dto.NINResultDTO;
+import io.mosip.packet_utility.dto.RegIdIdRepoStatusDTO;
 import io.mosip.packet_utility.service.PacketService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +32,43 @@ public class PacketController {
         return ResponseEntity.ok("NIN extraction started with batch processing.");
     }
 
+    @GetMapping("/getNinByRegId")
+    public ResponseEntity<NINResultDTO> getNinByRegId(@RequestParam String regId) {
+        NINResultDTO result = packetService.getNIN(regId);
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/checkIdRepoStatus")
+    public ResponseEntity<String> checkIdRepoStatus() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.checkIdRepoByRegIdStatus();
+            } catch (Exception e) {
+                System.err.println("Error in async ID-Repo presence check processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("ID-Repo presence check started. Check D:\\output\\idrepo-check.csv for the result.");
+    }
+
+    @GetMapping("/checkIdRepoByRegId")
+    public ResponseEntity<RegIdIdRepoStatusDTO> checkIdRepoByRegId(@RequestParam String regId) {
+        RegIdIdRepoStatusDTO result = packetService.checkRegIdInIdRepo(regId);
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/checkNameInfo")
+    public ResponseEntity<String> checkNameInfo() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.checkNameInfo();
+            } catch (Exception e) {
+                System.err.println("Error while checking name info: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+        return ResponseEntity.ok("Name info check started. Check D:\\output\\name-info.csv for the result.");
+    }
+
     @GetMapping("/ninstatus")
     public ResponseEntity<String> checkNINStatus() throws Exception {
         CompletableFuture.runAsync(() -> {
@@ -53,6 +92,18 @@ public class PacketController {
             }
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
+
+    @GetMapping("/updateResidence")
+    public ResponseEntity<String> updateResidence() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.updateResidence();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Residence update started. Check server logs for progress.");
     }
 
     @GetMapping("/addOrUpdateTag")
@@ -129,6 +180,19 @@ public class PacketController {
         return ResponseEntity.ok("Applicant field search started. Check D:\\output\\applicant-fields.csv for the result.");
     }
 
+    @GetMapping("/searchResidenceFields")
+    public ResponseEntity<String> searchResidenceFields() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.searchResidenceFields("reg_process.csv");
+            } catch (Exception e) {
+                System.err.println("Error while searching residence fields: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+        return ResponseEntity.ok("Residence field search started. Check D:\\output\\residence-fields.csv for the result.");
+    }
+
     @GetMapping("/extractDocuments")
     public ResponseEntity<String> extractDocuments(
             @RequestParam(defaultValue = "reg_process.csv") String inputFile) {
@@ -153,5 +217,54 @@ public class PacketController {
             }
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
+    }
+
+    @GetMapping("/residenceDetails")
+    public ResponseEntity<String> getResidenceDetails() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getApplicantResidence();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("Residence details fetch started. Check D:\\output\\applicant_residence.csv for the result.");
+    }
+
+    @GetMapping("/residenceCorrection")
+    public ResponseEntity<String> getResidenceCorrection() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getResidenceCorrection();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("Residence correction fetch started. Check D:\\output\\residence_correction.csv for the result.");
+    }
+
+    @GetMapping("/enrolmentDetails")
+    public ResponseEntity<String> getEnrolmentDetails() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getApplicantEnrolment();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: " + e);
+            }
+        });
+        return ResponseEntity.ok("Enrolment details fetch started. Check D:\\output\\applicant_enrolment.csv for the result.");
+    }
+
+    @GetMapping("/enrolmentStatus")
+    public ResponseEntity<String> checkEnrolmentStatus() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getEnrolmentStatus();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+
     }
 }

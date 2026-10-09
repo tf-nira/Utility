@@ -59,6 +59,9 @@ public class PacketServiceImpl implements PacketService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private LocationMasterDataService locationMasterDataService;
+
     @Value("${mosip.regproc.source}")
     private String source;
 
@@ -91,6 +94,9 @@ public class PacketServiceImpl implements PacketService {
 
     @Value("${io.mosip.output.file.path}")
     private String filepath;
+
+    @Value("${packet.utility.residence.update.fields}")
+    private String residenceUpdateFields;
 
     private Boolean allField =true;
 
@@ -833,6 +839,166 @@ public class PacketServiceImpl implements PacketService {
     }
 
     @Override
+    public void updateResidence() throws Exception {
+        List<List<String>> residenceList = readMultiFieldCSV();
+
+        int batchSize = 25;
+        List<List<List<String>>> batches = createMultiFieldBatches(residenceList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "update_nins_output.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(new String[]{"NIN", "STATUS"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + residenceList.size() + " NINs in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<List<String>> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " NINs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<NinStatusDTO>> futures = batch.stream().map(residenceInfo -> CompletableFuture
+                        .supplyAsync(() -> updateResidenceDetails(residenceInfo), executor).handle((ninStatusDTO, throwable) -> {
+
+                            if (throwable != null) {
+                                System.err.println("Error updating residence for NIN " + residenceInfo.get(0) + ": " + throwable.getMessage());
+                            }
+                            return ninStatusDTO;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<NinStatusDTO> future : futures) {
+                        NinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[]{result.getNin(), result.getStatus()});
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("Residence update completed successfully");
+    }
+
+    public UpdateRequestDTO createResidenceUpdateRequest(List<String> residenceInfo) {
+        Identity identity = new Identity();
+        identity.setIDSchemaVersion(8.7);
+        identity.setNIN(residenceInfo.get(0));
+
+        // Parse configurable field names from property (comma-separated)
+        List<String> fieldNames = Arrays.stream(residenceUpdateFields.split(","))
+                .map(String::trim)
+                .filter(f -> !f.isEmpty())
+                .collect(Collectors.toList());
+
+        // For each configured field, assign the corresponding value from the CSV row (in order)
+        // Field index in CSV: 0=NIN, 1=first configured field, 2=second, etc.
+        for (int i = 0; i < fieldNames.size(); i++) {
+            int csvIndex = i + 1;
+            if (csvIndex < residenceInfo.size() && isNotBlank(residenceInfo.get(csvIndex))) {
+                LocalizedValue localizedValue = new LocalizedValue();
+                localizedValue.setLanguage("eng");
+                localizedValue.setValue(residenceInfo.get(csvIndex));
+
+                String fieldName = fieldNames.get(i);
+                switch (fieldName) {
+                    case "applicantPlaceOfResidenceDistrict":
+                        identity.setApplicantPlaceOfResidenceDistrict(Collections.singletonList(localizedValue));
+                        break;
+                    case "applicantPlaceOfResidenceCounty":
+                        identity.setApplicantPlaceOfResidenceCounty(Collections.singletonList(localizedValue));
+                        break;
+                    case "applicantPlaceOfResidenceSubCounty":
+                        identity.setApplicantPlaceOfResidenceSubCounty(Collections.singletonList(localizedValue));
+                        break;
+                    case "applicantPlaceOfResidenceParish":
+                        identity.setApplicantPlaceOfResidenceParish(Collections.singletonList(localizedValue));
+                        break;
+                    case "applicantPlaceOfResidenceVillage":
+                        identity.setApplicantPlaceOfResidenceVillage(Collections.singletonList(localizedValue));
+                        break;
+                    default:
+                        System.out.println("Unknown field configured: " + fieldName + " - skipping");
+                        break;
+                }
+            }
+        }
+
+        RequestData requestData = new RequestData();
+        requestData.setRegistrationId(generateRandom10DigitString());
+        requestData.setIdentity(identity);
+
+        UpdateRequestDTO updateRequestDto = new UpdateRequestDTO();
+        updateRequestDto.setId("mosip.id.update");
+        updateRequestDto.setVersion("v1.0");
+        updateRequestDto.setRequesttime(DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+        updateRequestDto.setRequest(requestData);
+
+        return updateRequestDto;
+    }
+
+    public NinStatusDTO updateResidenceDetails(List<String> residenceInfo) {
+        NinStatusDTO ninStatusDTO = new NinStatusDTO();
+        ninStatusDTO.setNin(residenceInfo.get(0));
+
+        String url = updateIdentityUrl;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        UpdateRequestDTO updateRequestDTO = createResidenceUpdateRequest(residenceInfo);
+
+        HttpEntity<UpdateRequestDTO> entity = new HttpEntity<>(updateRequestDTO, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<UpdateResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.PATCH, entity, new ParameterizedTypeReference<ResponseWrapper<UpdateResponseDTO>>() {
+                    });
+
+            ResponseWrapper<UpdateResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                System.out.println("NIN residence not updated in ID repo: " + residenceInfo.get(0));
+                ninStatusDTO.setStatus(responseWrapper.getErrors().get(0).getMessage());
+                return ninStatusDTO;
+            }
+
+            ninStatusDTO.setStatus(responseWrapper.getResponse().getStatus());
+            return ninStatusDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for NIN " + residenceInfo.get(0) + ": " + e.getMessage());
+            ninStatusDTO.setStatus(e.getMessage());
+            return ninStatusDTO;
+        }
+    }
+
+    @Override
     public void getResidenceStatus() throws Exception {
 
         List<String> ninList = readNINsFromCSV(true);
@@ -975,6 +1141,137 @@ public class PacketServiceImpl implements PacketService {
             ridNinStatusDTO.setStatus(e.getMessage());
             return ridNinStatusDTO;
         }
+    }
+
+    public RidNinStatusDTO getEnrolment(String rid) {
+        RidNinStatusDTO ridNinStatusDTO = new RidNinStatusDTO();
+        ridNinStatusDTO.setRid(rid);
+
+        String handle = rid;
+        String url = idRepoUrl + handle;
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "metadata");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<NINStatusResponseDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<NINStatusResponseDTO>>() {
+                    });
+
+            ResponseWrapper<NINStatusResponseDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getResponse() != null) {
+
+                NINStatusResponseDTO response = responseWrapper.getResponse();
+
+                // Convert identity to JSON object
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode identityJson = mapper.valueToTree(response.getIdentity());
+
+                ridNinStatusDTO.setNin(identityJson.get("NIN").asText());
+
+                if (hasValue(identityJson, "residenceStatus")
+                        && hasValue(identityJson, "applicantPlaceOfEnrolmentCounty")
+                        && hasValue(identityJson, "applicantPlaceOfEnrolmentSubCounty")
+                        && hasValue(identityJson, "applicantPlaceOfEnrolmentParish")
+                        && hasValue(identityJson, "applicantPlaceOfEnrolmentVillage")) {
+
+                    ridNinStatusDTO.setStatus("need to update district");
+                }
+                else if (identityJson.hasNonNull("applicantForeignResidenceCountry") &&
+                        !identityJson.get("applicantForeignResidenceCountry").isEmpty()) {
+                    ridNinStatusDTO.setStatus("Outside Uganda");
+                }
+                else if (identityJson.hasNonNull("applicantPlaceOfEnrolmentCounty") &&
+                        !identityJson.get("applicantPlaceOfEnrolmentCounty").isEmpty()) {
+                    ridNinStatusDTO.setStatus("In Uganda");
+                }
+                else {
+                    // Default fallback if none of the above fields are present
+                    ridNinStatusDTO.setStatus("EXIST_IN_IDREPO");
+                }
+            }
+
+            else {
+                ridNinStatusDTO.setStatus("Does not Exist");
+            }
+
+            return ridNinStatusDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for RID " + rid + ": " + e.getMessage());
+            ridNinStatusDTO.setStatus(e.getMessage());
+            return ridNinStatusDTO;
+        }
+    }
+
+    public void getEnrolmentStatus() throws Exception {
+
+        List<String> ninList = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(ninList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "enrolment_status_report.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(new String[]{"RID", "NIN","Status"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninList.size() + " Enrolment status in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<RidNinStatusDTO>> futures = batch.stream().map(rid -> CompletableFuture
+                        .supplyAsync(() -> getEnrolment(rid), executor).handle((ridNinStatusDTO, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking Rid " + rid + ": " + throwable.getMessage());
+                            }
+                            return ridNinStatusDTO;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<RidNinStatusDTO> future : futures) {
+                        RidNinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[]{result.getRid(),result.getNin(), result.getStatus()});
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("Enrolment status status check completed successfully");
+
     }
 
     private ResponseWrapper<FieldsDTO> callMetaInfo(String regId, String process) {
@@ -1874,5 +2171,534 @@ public class PacketServiceImpl implements PacketService {
 
         return "";
     }
-}
 
+@Override
+    public void getApplicantEnrolment() throws Exception {
+        runLocationBatch(
+                "applicant_enrolment.csv",
+                new String[]{
+                        "reg_id",
+                        "applicantPlaceOfEnrolmentDistrict",
+                        "applicantPlaceOfEnrolmentCounty",
+                        "applicantPlaceOfEnrolmentSubCounty",
+                        "applicantPlaceOfEnrolmentParish",
+                        "applicantPlaceOfEnrolmentVillage",
+                        "remark",
+                        "failed_hierarchy_level"},
+                "applicantPlaceOfEnrolment",
+                "Applicant enrolment");
+    }
+
+    /**
+     * Reads RIDs from the input CSV, processes them in parallel batches, extracts
+     * the location fields with the given prefix from ID-Repo, validates the
+     * hierarchy and writes the result rows to the given output file.
+     */
+    private void runLocationBatch(String outputFileName, String[] header,
+                                  String fieldPrefix, String label) throws Exception {
+        List<String> regIds = readNINsFromCSV(true);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(regIds, batchSize);
+
+        Path outputPath = Paths.get(filepath, outputFileName);
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(header);
+            csvWriter.flush();
+
+            System.out.println("Processing " + regIds.size() + " RIDs in " + batches.size() + " batches for " + label);
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " RIDs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<String[]>> futures = batch.stream().map(regId -> CompletableFuture
+                        .supplyAsync(() -> getLocationRow(regId, fieldPrefix), executor).handle((row, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error fetching location for regId " + regId + ": " + throwable.getMessage());
+                            }
+                            return row;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<String[]> future : futures) {
+                        String[] row = future.get();
+                        if (row != null) {
+                            csvWriter.writeNext(row);
+                        }
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println(label + " fetch completed successfully");
+    }
+
+    /**
+     * Builds one output row for the given RID by reading the location fields
+     * (prefixed with the given field prefix) from ID-Repo and validating the
+     * hierarchy chain.
+     *
+     * @return {regId, district, county, subCounty, parish, village, remark, failedHierarchyLevel}
+     */
+    private String[] getLocationRow(String regId, String fieldPrefix) {
+        String[] row = {regId, "", "", "", "", "", "", ""};
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+
+            if (idRepoResponse == null || idRepoResponse.getIdentity() == null) {
+                row[6] = "No record found in ID Repo";
+                return row;
+            }
+
+            JsonNode identityJson = objectMapper.valueToTree(idRepoResponse.getIdentity());
+            String district = extractLocalizedValue(identityJson, fieldPrefix + "District");
+            String county = extractLocalizedValue(identityJson, fieldPrefix + "County");
+            String subCounty = extractLocalizedValue(identityJson, fieldPrefix + "SubCounty");
+            String parish = extractLocalizedValue(identityJson, fieldPrefix + "Parish");
+            String village = extractLocalizedValue(identityJson, fieldPrefix + "Village");
+
+            row[1] = district;
+            row[2] = county;
+            row[3] = subCounty;
+            row[4] = parish;
+            row[5] = village;
+
+            HierarchyValidationResultDTO validation = locationMasterDataService.validateResidenceHierarchy(
+                    district, county, subCounty, parish, village);
+            row[6] = validation.getStatus();
+            row[7] = validation.getFailedHierarchyLevel();
+
+        } catch (Exception e) {
+            System.err.println("Exception while fetching location for regId "
+                    + regId + ": " + e.getMessage());
+            row[6] = "ERROR: " + e.getMessage();
+        }
+
+        return row;
+    }
+    @Override
+    public void getApplicantResidence() throws Exception {
+        runLocationBatch(
+                "applicant_residence.csv",
+                new String[]{
+                        "reg_id",
+                        "applicantPlaceOfResidenceDistrict",
+                        "applicantPlaceOfResidenceCounty",
+                        "applicantPlaceOfResidenceSubCounty",
+                        "applicantPlaceOfResidenceParish",
+                        "applicantPlaceOfResidenceVillage",
+                        "remark",
+                        "failed_hierarchy_level"},
+                "applicantPlaceOfResidence",
+                "Applicant residence");
+    }
+
+    private ResidenceDetailsDTO getApplicantResidenceByRegId(String regId) {
+        ResidenceDetailsDTO residenceDetails = new ResidenceDetailsDTO();
+        residenceDetails.setRegId(regId);
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+
+            if (idRepoResponse == null || idRepoResponse.getIdentity() == null) {
+                residenceDetails.setRemark("No record found in ID Repo");
+                return residenceDetails;
+            }
+
+            JsonNode identityJson = objectMapper.valueToTree(idRepoResponse.getIdentity());
+            String district = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceDistrict");
+            String county = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceCounty");
+            String subCounty = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceSubCounty");
+            String parish = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceParish");
+            String village = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceVillage");
+
+            residenceDetails.setApplicantPlaceOfResidenceDistrict(district);
+            residenceDetails.setApplicantPlaceOfResidenceCounty(county);
+            residenceDetails.setApplicantPlaceOfResidenceSubCounty(subCounty);
+            residenceDetails.setApplicantPlaceOfResidenceParish(parish);
+            residenceDetails.setApplicantPlaceOfResidenceVillage(village);
+
+            // Validate the residence hierarchy chain against the location master data
+            HierarchyValidationResultDTO validation = locationMasterDataService.validateResidenceHierarchy(
+                    district, county, subCounty, parish, village);
+            residenceDetails.setRemark(validation.getStatus());
+            residenceDetails.setFailedHierarchyLevel(validation.getFailedHierarchyLevel());
+
+        } catch (Exception e) {
+            System.err.println("Exception while fetching applicant residence for regId "
+                    + regId + ": " + e.getMessage());
+            residenceDetails.setRemark("ERROR: " + e.getMessage());
+        }
+
+        return residenceDetails;
+    }
+
+    @Override
+    public void getResidenceCorrection() throws Exception {
+        List<String> regIds = readNINsFromCSV(true);
+        List<List<String>> batches = createBatches(regIds, 25);
+        Path outputPath = Paths.get(filepath, "residence_correction.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{
+                    "reg_id",
+                    "applicantPlaceOfResidenceDistrict",
+                    "applicantPlaceOfResidenceCounty",
+                    "applicantPlaceOfResidenceSubCounty",
+                    "applicantPlaceOfResidenceParish",
+                    "applicantPlaceOfResidenceVillage",
+                    "correctDistrict",
+                    "correctCounty",
+                    "correctSubCounty",
+                    "correctParish",
+                    "correctVillage",
+                    "mismatch_details",
+                    "remark",
+                    "failed_hierarchy_level"
+            });
+            csvWriter.flush();
+            System.out.println("Processing " + regIds.size() + " RIDs in " + batches.size() + " batches for residence correction");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                List<CompletableFuture<String[]>> futures = batch.stream().map(regId -> CompletableFuture
+                        .supplyAsync(() -> getResidenceCorrectionRow(regId), executor).handle((row, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error fetching residence correction for regId " + regId + ": " + throwable.getMessage());
+                            }
+                            return row;
+                        })).collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+                    for (CompletableFuture<String[]> future : futures) {
+                        String[] row = future.get();
+                        if (row != null) {
+                            csvWriter.writeNext(row);
+                        }
+                    }
+                    csvWriter.flush();
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+                Thread.sleep(1000);
+            }
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+        System.out.println("Residence correction fetch completed successfully");
+    }
+    /**
+     * Builds one output row for the given RID by reading the residence fields from
+     * ID-Repo, correcting bottom-up (village -> district) against the location master
+     * data, and reporting which stored values need correction.
+     */
+    private String[] getResidenceCorrectionRow(String regId) {
+        String[] row = {regId, "", "", "", "", "", "", "", "", "", "", "", "", ""};
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+
+            if (idRepoResponse == null || idRepoResponse.getIdentity() == null) {
+                row[12] = "No record found in ID Repo";
+                return row;
+            }
+
+            JsonNode identityJson = objectMapper.valueToTree(idRepoResponse.getIdentity());
+            String district = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceDistrict");
+            String county = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceCounty");
+            String subCounty = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceSubCounty");
+            String parish = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceParish");
+            String village = extractLocalizedValue(identityJson, "applicantPlaceOfResidenceVillage");
+
+            row[1] = district;
+            row[2] = county;
+            row[3] = subCounty;
+            row[4] = parish;
+            row[5] = village;
+
+            HierarchyCorrectionResultDTO correction = locationMasterDataService.correctResidenceHierarchy(
+                    district, county, subCounty, parish, village);
+
+            row[6] = correction.getCorrectDistrict();
+            row[7] = correction.getCorrectCounty();
+            row[8] = correction.getCorrectSubCounty();
+            row[9] = correction.getCorrectParish();
+            row[10] = correction.getCorrectVillage();
+            row[11] = formatMismatches(correction);
+            row[12] = correction.getStatus();
+            row[13] = correction.getFailedHierarchyLevel();
+
+        } catch (Exception e) {
+            System.err.println("Exception while fetching residence correction for regId "
+                    + regId + ": " + e.getMessage());
+            row[12] = "ERROR: " + e.getMessage();
+        }
+
+        return row;
+    }
+
+    private String formatMismatches(HierarchyCorrectionResultDTO correction) {
+        if (correction == null || correction.getMismatches() == null || correction.getMismatches().isEmpty()) {
+            return "";
+        }
+        return correction.getMismatches().stream()
+                .map(m -> m.getLevelName() + ": stored='" + m.getStoredValue() + "' correct='" + m.getCorrectValue() + "'")
+                .collect(Collectors.joining("; "));
+    }
+    public void checkNameInfo() throws Exception {
+        final int batchSize = 25;
+        String[] requestedFields = {"surname", "givenName", "otherNames"};
+        List<String[]> records = readRegProcessCSV("reg_process.csv");
+        int totalBatches = (records.size() + batchSize - 1) / batchSize;
+        Path outputPath = Paths.get(filepath, "name-info.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"reg_id", "process", "surname", "givenName", "otherNames", "remark"});
+
+            for (int start =  0; start < records.size(); start += batchSize) {
+                List<String[]> batch = records.subList(start, Math.min(start + batchSize, records.size()));
+                int batchNumber = (start / batchSize) + 1;
+                System.out.println("Processing name-info batch " + batchNumber + "/" + totalBatches
+                        + " (" + batch.size() + " records)");
+                List<CompletableFuture<String[]>> futures = batch.stream()
+                        .map(record -> CompletableFuture.supplyAsync(
+                                () -> checkNameInfo(record, requestedFields), executor))
+                        .collect(Collectors.toList());
+
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(2, TimeUnit.MINUTES);
+
+                for (CompletableFuture<String[]> future : futures) {
+                    String[] row = future.get();
+                    if (row != null) {
+                        csvWriter.writeNext(row);
+                    }
+                }
+                csvWriter.flush();
+                System.out.println("Completed name-info batch " + batchNumber + "/" + totalBatches);
+            }
+        }
+    }
+
+    private String[] checkNameInfo(String[] record, String[] requestedFields) {
+        String regId = record[0];
+        String recordProcess = record[1];
+        String[] base = {regId, recordProcess, "", "", "", ""};
+        try {
+            FieldsDTO packetResponse = callSearchFields(regId, recordProcess, requestedFields);
+            if (packetResponse != null && packetResponse.getFields() != null) {
+                Map<String, Object> fields = packetResponse.getFields();
+                String surname = cleanFieldValue(fields.get("surname"));
+                String givenName = cleanFieldValue(fields.get("givenName"));
+                String otherNames = cleanFieldValue(fields.get("otherNames"));
+                base[2] = surname;
+                base[3] = givenName;
+                base[4] = otherNames;
+
+                List<String> present = new ArrayList<>();
+                List<String> missing = new ArrayList<>();
+                if (!surname.isEmpty()) present.add("surname"); else missing.add("surname");
+                if (!givenName.isEmpty()) present.add("givenName"); else missing.add("givenName");
+                if (!otherNames.isEmpty()) present.add("otherNames"); else missing.add("otherNames");
+
+                if (missing.isEmpty()) {
+                    base[5] = "All three fields are present.";
+                } else if (present.isEmpty()) {
+                    base[5] = "None of the three fields are present.";
+                } else {
+                    base[5] = present.size() + " of 3 fields are present: " + String.join(", ", present)
+                            + ". Missing: " + String.join(", ", missing) + ".";
+                }
+            } else {
+                base[5] = "No record found in Packet Manager";
+            }
+        } catch (Exception e) {
+            base[5] = "ERROR: " + e.getMessage();
+        }
+        return base;
+    }
+
+    @Override
+    public void searchResidenceFields(String inputFile) throws Exception {
+        final int batchSize =  25;
+        String[] requestedFields = {"residenceStatus", "applicantPlaceOfResidenceDistrict",
+                "applicantPlaceOfResidenceCounty", "applicantPlaceOfResidenceSubCounty",
+                "applicantPlaceOfResidenceParish", "applicantPlaceOfResidenceVillage"};
+        List<String[]> records = readRegProcessCSV(inputFile);
+        Path outputPath = Paths.get(filepath, "residence-fields.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath);
+             CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"reg_id", "process", "residenceStatus",
+                    "applicantPlaceOfResidenceDistrict", "applicantPlaceOfResidenceCounty",
+                    "applicantPlaceOfResidenceSubCounty", "applicantPlaceOfResidenceParish",
+                    "applicantPlaceOfResidenceVillage", "remark"});
+
+            for ( int start = 0; start < records.size(); start += batchSize) {
+                List<String[]> batch = records.subList(start, Math.min(start + batchSize, records.size()));
+                List<CompletableFuture<String[]>> futures = batch.stream()
+                    .map(record -> CompletableFuture.supplyAsync(
+                        () -> searchResidenceFields(record, requestedFields), executor))
+                    .collect(Collectors.toList());
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(2, TimeUnit.MINUTES);
+                for (CompletableFuture<String[]> future : futures) {
+                    csvWriter.writeNext(future.get());
+                }
+                csvWriter.flush();
+            }
+        }
+    }
+
+    private String[] searchResidenceFields(String[] record, String[] requestedFields) {
+        String regId = record[0];
+        String recordProcess = record[1];
+        String[] base = {regId, recordProcess, "", "", "", "", "", "", ""};
+        try {
+            FieldsDTO packetResponse = callSearchFields(regId, recordProcess, requestedFields);
+            if (packetResponse != null && packetResponse.getFields() != null) {
+
+                Map<String, Object> fields = packetResponse.getFields();
+                base[2] = cleanFieldValue(fields.get("residenceStatus"));
+                base[3] = cleanFieldValue(fields.get("applicantPlaceOfResidenceDistrict"));
+                base[4] = cleanFieldValue(fields.get("applicantPlaceOfResidenceCounty"));
+                base[5] = cleanFieldValue(fields.get("applicantPlaceOfResidenceSubCounty"));
+                base[6] = cleanFieldValue(fields.get("applicantPlaceOfResidenceParish"));
+                base[7] = cleanFieldValue(fields.get("applicantPlaceOfResidenceVillage"));
+            } else {
+                base[8] = "No record found in Packet Manager";
+
+            }
+        } catch (Exception e) {
+            base[8] = "ERROR: " + e.getMessage();
+        }
+        return base;
+    }
+
+    @Override
+    public void checkIdRepoByRegIdStatus() throws Exception {
+        List<String> regIds = readNINsFromCSV(true);
+        List<List<String>> batches = createBatches(regIds, 25);
+        Path outputPath = Paths.get(filepath, "idrepo-check.csv");
+        Files.createDirectories(outputPath.getParent());
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+            csvWriter.writeNext(new String[]{"reg_id", "status", "nin", "remark"});
+            csvWriter.flush();
+            System.out.println("Processing " + regIds.size() + " RIDs in " + batches.size()
+                    + " batches for ID-Repo presence check");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                List<CompletableFuture<String[]>> futures = batch.stream().map(regId -> CompletableFuture
+                        .supplyAsync(() -> getRegIdIdRepoRow(regId), executor).handle((row, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking regId " + regId + " in ID-Repo: "
+                                        + throwable.getMessage());
+                            }
+                            return row;
+                        })).collect(Collectors.toList());
+
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+                try {
+                    allOf.get(2, TimeUnit.MINUTES);
+                    for (CompletableFuture<String[]> future : futures) {
+                        String[] row = future.get();
+                        if (row != null) {
+                            csvWriter.writeNext(row);
+                        }
+                    }
+                    csvWriter.flush();
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 2 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+                Thread.sleep(1000);
+            }
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+        System.out.println("ID-Repo presence check completed successfully. Results saved to: "
+                + outputPath.toAbsolutePath());
+    }
+
+    @Override
+    public RegIdIdRepoStatusDTO checkRegIdInIdRepo(String regId) {
+        RegIdIdRepoStatusDTO dto = new RegIdIdRepoStatusDTO();
+        dto.setRegId(regId);
+        try {
+            NINStatusResponseDTO idRepoResponse = callIdRepoByApplicationId(regId);
+
+            if (idRepoResponse == null || idRepoResponse.getIdentity() == null) {
+                dto.setStatus("NOT_FOUND");
+                dto.setRemark("No record found in ID Repo");
+            } else {
+                dto.setStatus("PRESENT_IN_IDREPO");
+                JsonNode identityJson = objectMapper.valueToTree(idRepoResponse.getIdentity());
+                dto.setNin(extractNinFromIdentity(identityJson));
+            }
+        } catch (Exception e) {
+            dto.setStatus("ERROR");
+            dto.setRemark(e.getMessage());
+        }
+        return dto;
+    }
+
+    private String[] getRegIdIdRepoRow(String regId) {
+        RegIdIdRepoStatusDTO dto = checkRegIdInIdRepo(regId);
+        return new String[]{dto.getRegId(), dto.getStatus(), dto.getNin(), dto.getRemark()};
+    }
+
+    private String extractNinFromIdentity(JsonNode identityJson) {
+        if (identityJson == null || !identityJson.hasNonNull("NIN")) {
+            return "";
+        }
+        JsonNode nin = identityJson.get("NIN");
+        if (nin.isArray()) {
+            for (JsonNode item : nin) {
+                if (item.hasNonNull("value")) {
+                    return item.get("value").asText();
+                }
+            }
+            return "";
+        }
+        return nin.asText();
+    }
+}

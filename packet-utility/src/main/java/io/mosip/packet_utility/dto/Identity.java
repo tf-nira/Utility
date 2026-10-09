@@ -24,4 +24,9 @@ public class Identity {
     private List<LocalizedValue> gender;
     private String dateOfBirth;
     private List<LocalizedValue> residenceStatus;
+    private List<LocalizedValue> applicantPlaceOfResidenceDistrict;
+    private List<LocalizedValue> applicantPlaceOfResidenceCounty;
+    private List<LocalizedValue> applicantPlaceOfResidenceSubCounty;
+    private List<LocalizedValue> applicantPlaceOfResidenceParish;
+    private List<LocalizedValue> applicantPlaceOfResidenceVillage;
 }
