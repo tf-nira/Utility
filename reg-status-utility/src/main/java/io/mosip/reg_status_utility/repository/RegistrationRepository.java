@@ -28,7 +28,7 @@ public interface RegistrationRepository extends JpaRepository<RegistrationEntity
             "trn_retry_count = 0, " +
             "reg_process_retry_count = 0 " +
             "WHERE reg_stage_name = 'PacketValidatorStage' " +
-            "AND process = 'CRVS_NEW' " +
+            "AND process IN ('CRVS_NEW', 'DEACTIVATED') " +
             "AND status_code IN ('PROCESSING', 'REPROCESS')",
             nativeQuery = true)
     int updateOpenCrvs();

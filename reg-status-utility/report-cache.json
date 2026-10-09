@@ -1,0 +1,77 @@
+{
+  "dataDate" : "2026-09-08",
+  "processTypeByDate" : [ {
+    "statusCode" : "Alien New Registration",
+    "count" : 25
+  }, {
+    "statusCode" : "BIOMETRIC_CORRECTION",
+    "count" : 72
+  }, {
+    "statusCode" : "CRVS_NEW",
+    "count" : 130
+  }, {
+    "statusCode" : "FIRSTID",
+    "count" : 3548
+  }, {
+    "statusCode" : "LOST",
+    "count" : 41
+  }, {
+    "statusCode" : "MIGRATOR",
+    "count" : 147
+  }, {
+    "statusCode" : "NEW",
+    "count" : 38292
+  }, {
+    "statusCode" : "RENEWAL",
+    "count" : 8114
+  }, {
+    "statusCode" : "UPDATE",
+    "count" : 449
+  } ],
+  "processedByDate" : [ {
+    "statusCode" : "Alien New Registration",
+    "count" : 165
+  }, {
+    "statusCode" : "BIOMETRIC_CORRECTION",
+    "count" : 22
+  }, {
+    "statusCode" : "CRVS_NEW",
+    "count" : 140
+  }, {
+    "statusCode" : "FIRSTID",
+    "count" : 4598
+  }, {
+    "statusCode" : "LOST",
+    "count" : 76
+  }, {
+    "statusCode" : "MIGRATOR",
+    "count" : 19466
+  }, {
+    "statusCode" : "NEW",
+    "count" : 69780
+  }, {
+    "statusCode" : "RENEWAL",
+    "count" : 13840
+  }, {
+    "statusCode" : "UPDATE",
+    "count" : 122
+  } ],
+  "holdAndFailedByDate" : [ {
+    "statusCode" : "FAILED",
+    "count" : 286
+  }, {
+    "statusCode" : "ON_HOLD",
+    "count" : 2790
+  } ],
+  "mvsInqueueByDate" : [ {
+    "statusCode" : "INQUEUE",
+    "count" : 15945
+  } ],
+  "printingByDate" : [ {
+    "statusCode" : "Alien",
+    "count" : 141
+  }, {
+    "statusCode" : "Citizen",
+    "count" : 26773
+  } ]
+}

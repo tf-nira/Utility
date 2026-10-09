@@ -1,6 +1,8 @@
 package io.mosip.reg_status_utility.service;
 
 import io.mosip.reg_status_utility.dto.StatusCodeCountProjection;
+import io.mosip.reg_status_utility.dto.CacheRow;
+import io.mosip.reg_status_utility.dto.CachedSnapshot;
 import io.mosip.reg_status_utility.repository.mvs.MvsRepository;
 import io.mosip.reg_status_utility.repository.RegistrationRepository;
 import io.mosip.reg_status_utility.repository.ida.IdaRepository;
@@ -21,6 +23,7 @@ import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +47,9 @@ public class TemplateStatusEmailJob {
 
     @Autowired
     private MvsRepository mvsRepository;
+
+    @Autowired
+    private ReportCacheService reportCacheService;
 
     @Value("classpath:status mail html template.txt")
     private Resource statusMailTemplate;
@@ -116,6 +122,42 @@ public class TemplateStatusEmailJob {
         return list.isEmpty() ? 0 : list.get(0).getCount();
     }
 
+    private List<CacheRow> toCacheRows(List<StatusCodeCountProjection> list) {
+        if (list == null) {
+            return Collections.emptyList();
+        }
+        return list.stream()
+                .map(p -> new CacheRow(p.getStatusCode(), p.getCount()))
+                .collect(Collectors.toList());
+    }
+
+    private List<StatusCodeCountProjection> toProjections(List<CacheRow> rows) {
+        if (rows == null) {
+            return Collections.emptyList();
+        }
+        return rows.stream().map(cacheRow -> new StatusCodeCountProjection() {
+            @Override
+            public String getStatusCode() {
+                return cacheRow.getStatusCode();
+            }
+
+            @Override
+            public Long getCount() {
+                return cacheRow.getCount();
+            }
+
+            @Override
+            public java.sql.Date getCurrentDate() {
+                return null;
+            }
+
+            @Override
+            public java.sql.Time getCurrentTime() {
+                return null;
+            }
+        }).collect(Collectors.toList());
+    }
+
     private Map<String, Long> toCountMap(List<StatusCodeCountProjection> list) {
         return list.stream().collect(Collectors.toMap(
                 projection -> projection.getStatusCode() == null ? "" : projection.getStatusCode().toUpperCase(Locale.ROOT),
@@ -137,25 +179,43 @@ public class TemplateStatusEmailJob {
             // Keep repository access sequential because JPA/Hibernate repository calls are not thread-safe here.
             List<StatusCodeCountProjection> r1 = registrationRepository.getStatusCodeCount();
             List<StatusCodeCountProjection> r2c = registrationRepository.getProcessTypeCountCumulative();
-            List<StatusCodeCountProjection> r2d1 = registrationRepository.getProcessTypeCountByDate(datePattern1);
-            List<StatusCodeCountProjection> r2d2 = registrationRepository.getProcessTypeCountByDate(datePattern2);
             List<StatusCodeCountProjection> r4c = registrationRepository.getProcessedCountCumulative();
-            List<StatusCodeCountProjection> r4d1 = registrationRepository.getProcessedCountByDate(datePattern1);
-            List<StatusCodeCountProjection> r4d2 = registrationRepository.getProcessedCountByDate(datePattern2);
             List<StatusCodeCountProjection> r3d1 = registrationRepository.getMAStatsByDate(datePattern1);
             List<StatusCodeCountProjection> r3d2 = registrationRepository.getMAStatsByDate(datePattern2);
             List<StatusCodeCountProjection> r3t = registrationRepository.getMAStatsTotal();
-            List<StatusCodeCountProjection> rHoldFailed1 = registrationRepository.getHoldAndFailedByDate(datePattern1);
-            List<StatusCodeCountProjection> rHoldFailed2 = registrationRepository.getHoldAndFailedByDate(datePattern2);
-            List<StatusCodeCountProjection> r5d1 = cardDetailRepository.getPrintingCountByDate(datePattern1);
-            List<StatusCodeCountProjection> r5d2 = cardDetailRepository.getPrintingCountByDate(datePattern2);
             List<StatusCodeCountProjection> r5t = cardDetailRepository.getPrintingCountTotal();
             List<StatusCodeCountProjection> r6d1 = idaRepository.getIDAStoredCountByDate(datePattern1);
             List<StatusCodeCountProjection> r6d2 = idaRepository.getIDAStoredCountByDate(datePattern2);
             List<StatusCodeCountProjection> r6t = idaRepository.getIDAStoredCountTotal();
-            List<StatusCodeCountProjection> rMvsd1 = mvsRepository.getInqueueCountByDate(datePattern1);
-            List<StatusCodeCountProjection> rMvsd2 = mvsRepository.getInqueueCountByDate(datePattern2);
             List<StatusCodeCountProjection> rMvst = mvsRepository.getInqueueCountTotal();
+
+            // Day-before-yesterday (d2) data: reuse the file saved yesterday if its date matches, else query.
+            String d2Date = dayBeforeYesterday.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            CachedSnapshot cache = reportCacheService.load(d2Date);
+            boolean d2FromCache = cache != null;
+
+            // Yesterday (d1) data is always queried fresh and then persisted for reuse tomorrow.
+            List<StatusCodeCountProjection> r2d1 = registrationRepository.getProcessTypeCountByDate(datePattern1);
+            List<StatusCodeCountProjection> r4d1 = registrationRepository.getProcessedCountByDate(datePattern1);
+            List<StatusCodeCountProjection> rHoldFailed1 = registrationRepository.getHoldAndFailedByDate(datePattern1);
+            List<StatusCodeCountProjection> r5d1 = cardDetailRepository.getPrintingCountByDate(datePattern1);
+            List<StatusCodeCountProjection> rMvsd1 = mvsRepository.getInqueueCountByDate(datePattern1);
+
+            // ---- Persist today's "yesterday" results to a file so tomorrow they can be reused as "day before yesterday" ----
+            String d1Date = yesterday.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            CachedSnapshot snapshot = new CachedSnapshot(d1Date,
+                    toCacheRows(r2d1),
+                    toCacheRows(r4d1),
+                    toCacheRows(rHoldFailed1),
+                    toCacheRows(rMvsd1),
+                    toCacheRows(r5d1));
+            reportCacheService.save(snapshot);
+
+            List<StatusCodeCountProjection> r2d2 = d2FromCache ? toProjections(cache.getProcessTypeByDate()) : registrationRepository.getProcessTypeCountByDate(datePattern2);
+            List<StatusCodeCountProjection> r4d2 = d2FromCache ? toProjections(cache.getProcessedByDate()) : registrationRepository.getProcessedCountByDate(datePattern2);
+            List<StatusCodeCountProjection> rHoldFailed2 = d2FromCache ? toProjections(cache.getHoldAndFailedByDate()) : registrationRepository.getHoldAndFailedByDate(datePattern2);
+            List<StatusCodeCountProjection> r5d2 = d2FromCache ? toProjections(cache.getPrintingByDate()) : cardDetailRepository.getPrintingCountByDate(datePattern2);
+            List<StatusCodeCountProjection> rMvsd2 = d2FromCache ? toProjections(cache.getMvsInqueueByDate()) : mvsRepository.getInqueueCountByDate(datePattern2);
 
             // ---- REPORT 1: ALL APPLICATIONS ----
             Map<String, Long> countMap = toMap(r1);
