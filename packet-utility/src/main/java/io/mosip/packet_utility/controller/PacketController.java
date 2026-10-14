@@ -89,4 +89,17 @@ public class PacketController {
         });
         return ResponseEntity.ok("Processing started. Check server logs for progress.");
     }
+    
+    @GetMapping("/ida/ninstatus")
+    public ResponseEntity<String> idaCheckNINStatus() throws Exception {
+        CompletableFuture.runAsync(() -> {
+            try {
+                packetService.getIdaNINStatus();
+            } catch (Exception e) {
+                System.out.println("Error in async processing:: "+ e);
+            }
+        });
+        return ResponseEntity.ok("Processing started. Check server logs for progress.");
+
+    }
 }

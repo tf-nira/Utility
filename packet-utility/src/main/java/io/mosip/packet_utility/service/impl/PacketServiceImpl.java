@@ -73,6 +73,9 @@ public class PacketServiceImpl implements PacketService {
     @Value("${io.mosip.output.file.path}")
     private String filepath;
 
+    @Value("${io.mosip.ida.fetch.nin-details.url}")
+    private String idaUrl;
+    
     private Boolean allField =false;
 
     private final Executor executor = Executors.newFixedThreadPool(200);
@@ -619,11 +622,12 @@ public class PacketServiceImpl implements PacketService {
         ninStatusDTO.setNin(nin);
 
         String handle = nin.toLowerCase() + "@nin";
+        //String handle = nin;
         String url = idRepoUrl + handle;
 
-        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("type", "all")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+        		.queryParam("type", "all")
                 .queryParam("idType", "handle");
-
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<String> entity = new HttpEntity<>(null, headers);
@@ -1135,5 +1139,110 @@ public class PacketServiceImpl implements PacketService {
 
     return prnApplication;
     }
+    
+    @Override
+    public void getIdaNINStatus() throws Exception {
+        List<String> ninList = readNINsFromCSV(false);
+
+        int batchSize = 25;
+        List<List<String>> batches = createBatches(ninList, batchSize);
+
+        Path outputPath = Paths.get(filepath, "ida_nin_status_report.csv");
+
+        try (Writer writer = Files.newBufferedWriter(outputPath); CSVWriter csvWriter = new CSVWriter(writer)) {
+
+            // Write header
+            csvWriter.writeNext(new String[]{"NIN", "STATUS"});
+            csvWriter.flush();
+
+            System.out.println("Processing " + ninList.size() + " NINs in " + batches.size() + " batches");
+
+            for (int i = 0; i < batches.size(); i++) {
+                List<String> batch = batches.get(i);
+                System.out.println(
+                        "Processing batch " + (i + 1) + "/" + batches.size() + " with " + batch.size() + " NIMs");
+
+                // Processing batch in parallel
+                List<CompletableFuture<NinStatusDTO>> futures = batch.stream().map(nin -> CompletableFuture
+                        .supplyAsync(() -> IdaCheckNINExistsAsync(nin), executor).handle((ninStatusDTO, throwable) -> {
+                            if (throwable != null) {
+                                System.err.println("Error checking NIN " + nin + ": " + throwable.getMessage());
+                            }
+                            return ninStatusDTO;
+                        })).collect(Collectors.toList());
+
+                // Waiting for all futures in the batch to complete
+                CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+
+                try {
+                    // Wait for batch completion with timeout
+                    allOf.get(2, TimeUnit.MINUTES);
+
+                    // Write results for this batch
+                    for (CompletableFuture<NinStatusDTO> future : futures) {
+                        NinStatusDTO result = future.get();
+                        csvWriter.writeNext(new String[]{result.getNin(), result.getStatus()});
+                    }
+                    csvWriter.flush();
+
+                    System.out.println("Completed batch " + (i + 1) + "/" + batches.size());
+
+                } catch (TimeoutException e) {
+                    System.err.println("Batch " + (i + 1) + " timed out after 5 minutes");
+                } catch (ExecutionException | InterruptedException e) {
+                    System.err.println("Error processing batch " + (i + 1) + ": " + e.getMessage());
+                }
+
+                // Small delay between batches
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error occurred: " + e.getMessage());
+            throw e;
+        }
+
+        System.out.println("NIN status check completed successfully");
+    }
+    
+
+public NinStatusDTO IdaCheckNINExistsAsync(String nin) {
+        NinStatusDTO ninStatusDTO = new NinStatusDTO();
+        ninStatusDTO.setNin(nin);
+
+        String handle = nin.toLowerCase() + "@nin";
+        //String handle = nin;
+        String url = idaUrl + handle;
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(null, headers);
+
+        try {
+            ResponseEntity<ResponseWrapper<IdentityCacheDataDTO>> responseEntity = restTemplate.exchange(builder.build().toUri(),
+                    HttpMethod.GET, entity, new ParameterizedTypeReference<ResponseWrapper<IdentityCacheDataDTO>>() {
+                    });
+
+            ResponseWrapper<IdentityCacheDataDTO> responseWrapper = responseEntity.getBody();
+
+            if (responseWrapper.getResponse() != null) {
+                ninStatusDTO.setStatus("EXIST_IN_IDA");
+            }
+
+            if (responseWrapper.getErrors() != null && !responseWrapper.getErrors().isEmpty()) {
+                System.out.println("NIN not found in IDA: " + nin);
+                ninStatusDTO.setStatus("NOT_FOUND");
+            }
+
+            return ninStatusDTO;
+
+        } catch (RestClientException e) {
+            System.err.println("Exception for NIN " + nin + ": " + e.getMessage());
+            ninStatusDTO.setStatus(e.getMessage());
+            return ninStatusDTO;
+        }
+    }
+    
 }
 
